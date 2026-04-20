@@ -1,0 +1,10 @@
+# Valid Turtle example
+@prefix ex:  <http://example.org/> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+
+ex:Alice a foaf:Person ;
+    foaf:name "Alice" ;
+    foaf:knows ex:Bob .
+
+ex:Bob a foaf:Person ;
+    foaf:name "Bob" .
