@@ -1,0 +1,286 @@
+/*
+ * Copyright (c) 2026 Robert Bosch Manufacturing Solutions GmbH
+ *
+ * See the AUTHORS file(s) distributed with this work for additional
+ * information regarding authorship.
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
+import * as vscode from 'vscode';
+import {
+    GraphicalViewCommands,
+    GraphicalViewController,
+    GraphicalViewDelivery,
+    GraphicalViewDocument,
+    GraphicalViewPanelAdapter,
+    GraphicalViewPanelFactory,
+    GraphicalViewWindow,
+    GraphicalViewWorkspace,
+} from '../graphicalView';
+import {
+    GraphicalViewRenderParams,
+    GraphicalViewRenderResult,
+    GraphicalViewRequestClient,
+    GraphicalViewResolveTargetParams,
+    GraphicalViewResolveTargetResult,
+} from '../graphicalViewProtocol';
+import type {ExtensionLogger} from '../outputChannel';
+
+export interface RecordedRenderRequest {
+    readonly params: GraphicalViewRenderParams;
+    readonly token: vscode.CancellationToken;
+    readonly deferred: Deferred<GraphicalViewRenderResult>;
+}
+
+export class FakeGraphicalViewClient implements GraphicalViewRequestClient {
+    readonly requests: RecordedRenderRequest[] = [];
+    private readonly listeners = new Set<(available: boolean) => void>();
+
+    constructor(private available = true) {}
+
+    isGraphicalViewAvailable(): boolean {
+        return this.available;
+    }
+
+    onDidChangeGraphicalViewAvailability(listener: (available: boolean) => void): vscode.Disposable {
+        this.listeners.add(listener);
+        return new vscode.Disposable(() => this.listeners.delete(listener));
+    }
+
+    renderGraphicalView(params: GraphicalViewRenderParams, token: vscode.CancellationToken): Promise<GraphicalViewRenderResult> {
+        const deferred = new Deferred<GraphicalViewRenderResult>();
+        this.requests.push({params, token, deferred});
+        return deferred.promise;
+    }
+
+    resolveGraphicalViewTarget(
+        _params: GraphicalViewResolveTargetParams,
+        _token?: vscode.CancellationToken,
+    ): Promise<GraphicalViewResolveTargetResult> {
+        return Promise.resolve({location: null, warning: 'temporarilyUnresolvable'});
+    }
+
+    setAvailable(available: boolean): void {
+        this.available = available;
+        for (const listener of [...this.listeners]) {
+            listener(available);
+        }
+    }
+}
+
+export class FakeGraphicalViewPanel implements GraphicalViewPanelAdapter {
+    readonly deliveries: GraphicalViewDelivery[] = [];
+    revealCount = 0;
+    disposeCount = 0;
+    disposedListenerCount = 0;
+    private readonly disposeListeners = new Set<() => void>();
+    private readonly visibilityListeners = new Set<(visible: boolean) => void>();
+    private readonly messageListeners = new Set<(message: unknown) => void>();
+
+    constructor(public visible = true) {}
+
+    reveal(): void {
+        this.revealCount += 1;
+        this.setVisible(true);
+    }
+
+    deliver(delivery: GraphicalViewDelivery): void {
+        this.deliveries.push(delivery);
+    }
+
+    onDidDispose(listener: () => void): vscode.Disposable {
+        this.disposeListeners.add(listener);
+        return this.listenerDisposable(this.disposeListeners, listener);
+    }
+
+    onDidChangeVisibility(listener: (visible: boolean) => void): vscode.Disposable {
+        this.visibilityListeners.add(listener);
+        return this.listenerDisposable(this.visibilityListeners, listener);
+    }
+
+    onDidReceiveMessage(listener: (message: unknown) => void): vscode.Disposable {
+        this.messageListeners.add(listener);
+        return this.listenerDisposable(this.messageListeners, listener);
+    }
+
+    setVisible(visible: boolean): void {
+        if (this.visible === visible) {
+            return;
+        }
+        this.visible = visible;
+        for (const listener of [...this.visibilityListeners]) {
+            listener(visible);
+        }
+    }
+
+    emitMessage(message: unknown): void {
+        for (const listener of [...this.messageListeners]) {
+            listener(message);
+        }
+    }
+
+    dispose(): void {
+        if (this.disposeCount > 0) {
+            return;
+        }
+        this.disposeCount += 1;
+        for (const listener of [...this.disposeListeners]) {
+            listener();
+        }
+    }
+
+    private listenerDisposable<T>(listeners: Set<T>, listener: T): vscode.Disposable {
+        return new vscode.Disposable(() => {
+            if (listeners.delete(listener)) {
+                this.disposedListenerCount += 1;
+            }
+        });
+    }
+}
+
+export class FakeGraphicalViewPanelFactory implements GraphicalViewPanelFactory {
+    readonly panels: FakeGraphicalViewPanel[] = [];
+
+    create(_sourceUri: string): FakeGraphicalViewPanel {
+        const panel = new FakeGraphicalViewPanel();
+        this.panels.push(panel);
+        return panel;
+    }
+}
+
+export function createGraphicalViewHarness(client = new FakeGraphicalViewClient()) {
+    const panels = new FakeGraphicalViewPanelFactory();
+    const commands = new FakeCommands();
+    const window = new FakeWindow();
+    const workspace = new FakeWorkspace();
+    const outputChannel = new FakeOutputChannel();
+    const controller = new GraphicalViewController(client, panels, commands, window, workspace, outputChannel);
+    const context = {subscriptions: [] as vscode.Disposable[]};
+    controller.register(context);
+    return {client, commands, context, controller, outputChannel, panels, window, workspace};
+}
+
+export function createGraphicalViewDocument(filePath: string, languageId = 'turtle'): GraphicalViewDocument {
+    return {languageId, uri: vscode.Uri.file(filePath)};
+}
+
+export function successfulResult(document: GraphicalViewDocument, suffix = '0123456789abcdef'): GraphicalViewRenderResult {
+    const id = `gv-header-${suffix}`;
+    return {
+        uri: document.uri.toString(),
+        svg: `<svg><g id="${id}"><text>Aspect</text></g></svg>`,
+        targets: [{id, kind: 'elementHeader', elementUrn: 'urn:samm:example.graphical:1.0.0#Aspect'}],
+        warnings: [],
+    };
+}
+
+export async function flushPromises(): Promise<void> {
+    await new Promise<void>(resolve => setImmediate(resolve));
+}
+
+class FakeCommands implements GraphicalViewCommands {
+    private readonly callbacks = new Map<string, () => unknown>();
+
+    registerCommand(command: string, callback: () => unknown): vscode.Disposable {
+        this.callbacks.set(command, callback);
+        return new vscode.Disposable(() => this.callbacks.delete(command));
+    }
+
+    async execute(command: string): Promise<unknown> {
+        return this.callbacks.get(command)?.();
+    }
+}
+
+class FakeWindow implements GraphicalViewWindow {
+    activeTextEditor: {document: GraphicalViewDocument} | undefined;
+    readonly warnings: string[] = [];
+
+    showWarningMessage(message: string): Promise<unknown> {
+        this.warnings.push(message);
+        return Promise.resolve(undefined);
+    }
+}
+
+class FakeWorkspace implements GraphicalViewWorkspace {
+    readonly available = new Set<string>();
+    private saveListener: ((document: GraphicalViewDocument) => void) | undefined;
+    private availabilityListener: ((sourceUri: string, available: boolean) => void) | undefined;
+
+    onDidSaveTextDocument(listener: (document: GraphicalViewDocument) => void): vscode.Disposable {
+        this.saveListener = listener;
+        return new vscode.Disposable(() => {
+            if (this.saveListener === listener) {
+                this.saveListener = undefined;
+            }
+        });
+    }
+
+    onDidChangeDocumentAvailability(listener: (sourceUri: string, available: boolean) => void): vscode.Disposable {
+        this.availabilityListener = listener;
+        return new vscode.Disposable(() => {
+            if (this.availabilityListener === listener) {
+                this.availabilityListener = undefined;
+            }
+        });
+    }
+
+    isDocumentAvailable(uri: string): boolean {
+        return this.available.has(uri);
+    }
+
+    fireSave(document: GraphicalViewDocument): void {
+        this.saveListener?.(document);
+    }
+
+    loseDocument(document: GraphicalViewDocument): void {
+        this.available.delete(document.uri.toString());
+        this.availabilityListener?.(document.uri.toString(), false);
+    }
+
+    closeSourceEditor(document: GraphicalViewDocument): void {
+        this.available.delete(document.uri.toString());
+        this.availabilityListener?.(document.uri.toString(), false);
+    }
+}
+
+class FakeOutputChannel implements ExtensionLogger {
+    readonly lines: string[] = [];
+    trace(message: string): void {
+        this.lines.push(`[trace] ${message}`);
+    }
+    info(message: string): void {
+        this.lines.push(`[info] ${message}`);
+    }
+    warn(message: string): void {
+        this.lines.push(`[warn] ${message}`);
+    }
+    error(message: string | Error): void {
+        this.lines.push(`[error] ${message instanceof Error ? message.message : message}`);
+    }
+}
+
+class Deferred<T> {
+    readonly promise: Promise<T>;
+    private resolvePromise!: (value: T) => void;
+    private rejectPromise!: (reason: unknown) => void;
+
+    constructor() {
+        this.promise = new Promise<T>((resolve, reject) => {
+            this.resolvePromise = resolve;
+            this.rejectPromise = reject;
+        });
+    }
+
+    resolve(value: T): void {
+        this.resolvePromise(value);
+    }
+
+    reject(reason: unknown): void {
+        this.rejectPromise(reason);
+    }
+}

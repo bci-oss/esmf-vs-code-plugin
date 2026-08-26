@@ -39,6 +39,12 @@
         "command": "turtle.selectSammCliExecutable",
         "title": "Select SAMM CLI Executable",
         "category": "Turtle"
+      },
+      {
+        "command": "turtle.openGraphicalView",
+        "title": "Open Graphical View",
+        "category": "Turtle",
+        "enablement": "editorLangId == turtle"
       }
     ],
     "languages": [
@@ -113,6 +119,11 @@
           "command": "turtle.validateDocumentNow",
           "when": "resourceLangId == turtle",
           "group": "1_modification"
+        },
+        {
+          "command": "turtle.openGraphicalView",
+          "when": "resourceLangId == turtle",
+          "group": "1_modification@2"
         }
       ]
     },

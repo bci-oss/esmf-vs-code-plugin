@@ -18,6 +18,8 @@ import { SammCliDownloader } from './sammCliDownloader';
 import { TurtleExtensionSettings } from './settings';
 import { TurtleLanguageClient } from './languageClient';
 import type { ExtensionLogger } from './outputChannel';
+import { GraphicalViewController } from './graphicalView';
+import { VscodeGraphicalViewPanelFactory } from './graphicalViewPanel';
 
 const SELECT_EXECUTABLE_COMMAND = 'turtle.selectSammCliExecutable';
 const SELECT_EXECUTABLE_TITLE = 'Select SAMM CLI Executable';
@@ -27,6 +29,7 @@ let settings: TurtleExtensionSettings;
 let languageServer: TurtleLanguageServer | undefined;
 let languageClient: TurtleLanguageClient;
 let aspectValidationController: AspectValidationController;
+let graphicalViewController: GraphicalViewController;
 let sammCliDownloader: SammCliDownloader;
 
 let outputChannel: ExtensionLogger;
@@ -43,6 +46,40 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     languageClient = new TurtleLanguageClient(outputChannel, settings.getSammCliLspServerPort(), settings.getLanguageClientTraceLevel());
     aspectValidationController = new AspectValidationController(createUnavailableClient(), vscode.window, vscode.workspace, outputChannel);
     aspectValidationController.register(context);
+    graphicalViewController = new GraphicalViewController(
+        undefined,
+        new VscodeGraphicalViewPanelFactory(),
+        vscode.commands,
+        vscode.window,
+        {
+            onDidSaveTextDocument: listener => vscode.workspace.onDidSaveTextDocument(listener),
+            onDidChangeDocumentAvailability: listener =>
+                vscode.Disposable.from(
+                    vscode.workspace.onDidOpenTextDocument(document => listener(document.uri.toString(), true)),
+                    vscode.workspace.onDidCloseTextDocument(document => listener(document.uri.toString(), false)),
+                    vscode.window.tabGroups.onDidChangeTabs(event => {
+                        for (const tab of event.closed) {
+                            if (tab.input instanceof vscode.TabInputText) {
+                                const sourceUri = tab.input.uri.toString();
+                                const remainsOpen = vscode.window.tabGroups.all.some(group =>
+                                    group.tabs.some(
+                                        candidate =>
+                                            candidate.input instanceof vscode.TabInputText &&
+                                            candidate.input.uri.toString() === sourceUri,
+                                    ),
+                                );
+                                if (!remainsOpen) {
+                                    listener(sourceUri, false);
+                                }
+                            }
+                        }
+                    }),
+                ),
+            isDocumentAvailable: uri => vscode.workspace.textDocuments.some(document => document.uri.toString() === uri),
+        },
+        outputChannel,
+    );
+    graphicalViewController.register(context);
 
     context.subscriptions.push(
         vscode.commands.registerCommand(SELECT_EXECUTABLE_COMMAND, async () => {
@@ -112,6 +149,7 @@ async function restartLanguageServices(reason: string): Promise<void> {
     outputChannel.info(`Restarting language services (${reason}).`);
 
     aspectValidationController.setClient(createUnavailableClient());
+    graphicalViewController.setClient(undefined);
     await languageClient.disconnect();
     await stopLanguageServer();
 
@@ -124,6 +162,7 @@ async function restartLanguageServices(reason: string): Promise<void> {
     } catch (error) {
         await stopLanguageServer().catch(() => undefined);
         aspectValidationController.setClient(createUnavailableClient());
+        graphicalViewController.setClient(undefined);
 
         throw error;
     }
@@ -132,6 +171,7 @@ async function restartLanguageServices(reason: string): Promise<void> {
     await nextClient.connect();
     languageClient = nextClient;
     aspectValidationController.setClient(nextClient);
+    graphicalViewController.setClient(nextClient);
 }
 
 type SammCliQuickPickItem = vscode.QuickPickItem & {
@@ -257,6 +297,7 @@ function createUnavailableClient(): RequestClient {
 }
 
 export async function deactivate(): Promise<void> {
+    graphicalViewController?.dispose();
     await restartChain;
     await languageClient.disconnect();
     await stopLanguageServer();
