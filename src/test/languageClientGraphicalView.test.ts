@@ -17,6 +17,7 @@ import {Trace} from 'vscode-jsonrpc';
 import {State, StateChangeEvent} from 'vscode-languageclient/node';
 import {
     GRAPHICAL_VIEW_RENDER_REQUEST,
+    GRAPHICAL_VIEW_RESOLVE_ATTRIBUTE_TARGET_REQUEST,
     GRAPHICAL_VIEW_RESOLVE_TARGET_REQUEST,
     GraphicalViewRenderResult,
     GraphicalViewResolveTargetResult,
@@ -37,12 +38,21 @@ suite('TurtleLanguageClient graphical-view integration', () => {
             sourceUri: 'file:///model.ttl',
             elementUrn: 'urn:samm:example:1.0.0#Aspect',
         });
+        const resolveAttribute = await client.resolveGraphicalViewAttributeTarget({
+            sourceUri: 'file:///model.ttl',
+            ownerUrn: 'urn:samm:example:1.0.0#Aspect',
+            predicateUrn: 'urn:samm:org.eclipse.esmf.samm:meta-model:2.2.0#description',
+            selection: 'singleOccurrence',
+            language: 'en',
+        });
 
         assert.equal(render.uri, 'file:///model.ttl');
         assert.equal(resolve.warning, 'notFound');
+        assert.equal(resolveAttribute.warning, 'notFound');
         assert.equal(adapter.requests[0].method, GRAPHICAL_VIEW_RENDER_REQUEST);
         assert.equal(adapter.requests[0].token, cancellation.token);
         assert.equal(adapter.requests[1].method, GRAPHICAL_VIEW_RESOLVE_TARGET_REQUEST);
+        assert.equal(adapter.requests[2].method, GRAPHICAL_VIEW_RESOLVE_ATTRIBUTE_TARGET_REQUEST);
         cancellation.dispose();
     });
 

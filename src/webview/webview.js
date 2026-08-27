@@ -162,6 +162,7 @@
             }
             const sanitized = SanitizerContract.sanitizeSvg(message.svg);
             const size = dimensions(sanitized.svg);
+            makeNavigationMarkersInteractive(sanitized.svg);
             diagram.replaceChildren(sanitized.fragment);
             currentSvg = sanitized.svg;
             currentVersion = message.version;
@@ -183,12 +184,37 @@
 
     viewport.addEventListener('scroll', persistState, {passive: true});
     diagram.addEventListener('click', event => {
-        const group = event.target instanceof Element ? event.target.closest('g[id^="gv-header-"]') : null;
-        if (!group || !diagram.contains(group) || !SanitizerContract.MARKER_PATTERN.test(group.id) || !Number.isInteger(currentVersion)) {
+        activateNavigationTarget(event.target);
+    });
+    diagram.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
             return;
         }
-        vscode.postMessage({type: 'navigate', version: currentVersion, targetId: group.id});
+        if (activateNavigationTarget(event.target)) {
+            event.preventDefault();
+        }
     });
+
+    function makeNavigationMarkersInteractive(svg) {
+        for (const group of svg.querySelectorAll('g[id]')) {
+            if (SanitizerContract.MARKER_PATTERN.test(group.id)) {
+                group.setAttribute('tabindex', '0');
+                group.setAttribute('role', 'link');
+                group.setAttribute('aria-label', group.id.startsWith('gv-attribute-')
+                    ? 'Navigate to attribute source statement'
+                    : 'Navigate to element definition');
+            }
+        }
+    }
+
+    function activateNavigationTarget(target) {
+        const group = target instanceof Element ? target.closest('g[id]') : null;
+        if (!group || !diagram.contains(group) || !SanitizerContract.MARKER_PATTERN.test(group.id) || !Number.isInteger(currentVersion)) {
+            return false;
+        }
+        vscode.postMessage({type: 'navigate', version: currentVersion, targetId: group.id});
+        return true;
+    }
 
     document.querySelector('#refresh').addEventListener('click', () => vscode.postMessage({type: 'refresh'}));
     document.querySelector('#zoom-in').addEventListener('click', () => setZoom(state.zoom * ZOOM_FACTOR));
@@ -219,7 +245,13 @@
         }
         if (testMode && isExactMessage(message, ['targetId', 'type']) && message.type === 'testClickMarker') {
             const marker = diagram.querySelector(`g[id="${CSS.escape(message.targetId)}"]`);
-            marker?.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+            const hitTarget = marker?.querySelector('polygon') ?? marker;
+            hitTarget?.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+            return;
+        }
+        if (testMode && isExactMessage(message, ['key', 'targetId', 'type']) && message.type === 'testKeyMarker') {
+            const marker = diagram.querySelector(`g[id="${CSS.escape(message.targetId)}"]`);
+            marker?.dispatchEvent(new KeyboardEvent('keydown', {key: message.key, bubbles: true}));
         }
     });
 

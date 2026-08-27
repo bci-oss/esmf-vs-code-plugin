@@ -53,7 +53,7 @@ suite('GraphicalViewController', () => {
         harness.window.activeTextEditor = {document};
         await harness.commands.execute(OPEN_GRAPHICAL_VIEW_COMMAND);
         assert.equal(harness.panels.panels.length, 1);
-        assert.deepEqual(harness.client.requests[0].params, {uri: document.uri.toString()});
+        assert.deepEqual(harness.client.requests[0].params, {uri: document.uri.toString(), includeAttributeRows: true});
         assert.equal(harness.controller.getPanelState(document.uri.toString())?.sequence, 1);
 
         harness.client.requests[0].deferred.resolve(successfulResult(document));
@@ -221,6 +221,8 @@ suite('GraphicalViewController', () => {
             {...good, targets: [{...good.targets[0], kind: 'notHeader' as 'elementHeader'}]},
             {...good, targets: [{...good.targets[0], elementUrn: 'not-a-urn'}]},
             {...good, svg: '<svg></svg>'},
+            {...good, targets: [{...good.targets[0], extra: 'rejected'}] as never},
+            {...good, svg: `${good.svg}<g id="gv-attribute-BAD"></g>`},
         ];
 
         for (const invalid of invalidResults) {
@@ -230,7 +232,9 @@ suite('GraphicalViewController', () => {
             const state = harness.controller.getPanelState(document.uri.toString());
             assert.equal(state?.status.kind, 'stale');
             assert.equal(state?.lastSuccess?.svg, good.svg);
-            assert.equal(state?.lastSuccess?.targetById.get(good.targets[0].id)?.elementUrn, good.targets[0].elementUrn);
+            const retainedTarget = state?.lastSuccess?.targetById.get(good.targets[0].id);
+            assert.equal(retainedTarget?.kind, 'elementHeader');
+            assert.equal(retainedTarget?.kind === 'elementHeader' ? retainedTarget.elementUrn : undefined, good.targets[0].elementUrn);
         }
         harness.controller.dispose();
     });
@@ -392,6 +396,182 @@ suite('GraphicalViewController', () => {
         assert.deepEqual(harness.window.openedEditors[0].editor.selection.start, new vscode.Position(3, 4));
         assert.deepEqual(harness.window.openedEditors[0].editor.selection.end, new vscode.Position(5, 6));
         assert.deepEqual(harness.window.openedEditors[0].revealedRanges[0], new vscode.Range(3, 4, 5, 6));
+        harness.controller.dispose();
+    });
+
+    test('accepts an exact attribute sidecar and routes only its trusted semantic selector to the attribute resolver', async () => {
+        const harness = createGraphicalViewHarness();
+        const document = track(harness, '/tmp/attribute-navigation-source.ttl');
+        await harness.controller.openGraphicalView(document);
+        const id = 'gv-attribute-0123456789abcdef';
+        const result: GraphicalViewRenderResult = {
+            uri: document.uri.toString(),
+            svg: `<svg><g id="${id}"><polygon points="0,0 1,0 1,1"/><text x="0" y="0">description: row</text></g></svg>`,
+            targets: [{
+                id,
+                kind: 'attributeRow',
+                ownerUrn: 'urn:samm:example.graphical:1.0.0#Aspect',
+                predicateUrn: 'urn:samm:org.eclipse.esmf.samm:meta-model:2.2.0#description',
+                selection: 'singleOccurrence',
+                language: 'en',
+            }],
+            warnings: [],
+        };
+        harness.client.requests[0].deferred.resolve(result);
+        await flushPromises();
+        harness.client.resolveResult = {
+            location: {
+                uri: vscode.Uri.file('/tmp/attribute-navigation-target.ttl').toString(),
+                range: {start: {line: 7, character: 3}, end: {line: 7, character: 19}},
+            },
+        };
+
+        harness.panels.panels[0].emitMessage({type: 'navigate', version: 1, targetId: id});
+        await flushPromises();
+        await flushPromises();
+
+        assert.equal(harness.client.resolveRequests.length, 0);
+        assert.deepEqual(harness.client.attributeResolveRequests[0].params, {
+            sourceUri: document.uri.toString(),
+            ownerUrn: 'urn:samm:example.graphical:1.0.0#Aspect',
+            predicateUrn: 'urn:samm:org.eclipse.esmf.samm:meta-model:2.2.0#description',
+            selection: 'singleOccurrence',
+            language: 'en',
+        });
+        assert.deepEqual(harness.window.openedEditors[0].editor.selection.start, new vscode.Position(7, 3));
+        harness.controller.dispose();
+    });
+
+    test('opens the same predicate statement from both physical rows of a wrapped aggregated see target', async () => {
+        const harness = createGraphicalViewHarness();
+        const document = track(harness, '/tmp/wrapped-see-source.ttl');
+        await harness.controller.openGraphicalView(document);
+        const ids = ['gv-attribute-1111111111111111', 'gv-attribute-2222222222222222'] as const;
+        const locator = {
+            kind: 'attributeRow' as const,
+            ownerUrn: 'urn:samm:example.graphical:1.0.0#Aspect',
+            predicateUrn: 'urn:samm:org.eclipse.esmf.samm:meta-model:2.2.0#see',
+            selection: 'predicateStart' as const,
+        };
+        const result: GraphicalViewRenderResult = {
+            uri: document.uri.toString(),
+            svg: `<svg><g id="${ids[0]}"><text>see: urn:irdi:0173:1:02:AAO677:002,</text></g>`
+                + `<g id="${ids[1]}"><text>urn:irdi:0173:1:02:AAO677:003</text></g></svg>`,
+            targets: ids.map(id => ({id, ...locator})),
+            warnings: [],
+        };
+        harness.client.requests[0].deferred.resolve(result);
+        await flushPromises();
+        const targetUri = vscode.Uri.file('/tmp/wrapped-see-source.ttl');
+        harness.client.resolveResult = {
+            location: {
+                uri: targetUri.toString(),
+                range: {start: {line: 8, character: 3}, end: {line: 8, character: 11}},
+            },
+        };
+
+        for (const id of ids) {
+            harness.panels.panels[0].emitMessage({type: 'navigate', version: 1, targetId: id});
+            await flushPromises();
+            await flushPromises();
+        }
+
+        assert.equal(harness.client.attributeResolveRequests.length, 2);
+        const expectedParams = {
+            sourceUri: document.uri.toString(),
+            ownerUrn: locator.ownerUrn,
+            predicateUrn: locator.predicateUrn,
+            selection: locator.selection,
+        };
+        assert.deepEqual(harness.client.attributeResolveRequests.map(request => request.params), [expectedParams, expectedParams]);
+        assert.equal(harness.window.openedEditors.length, 2);
+        assert.ok(harness.window.openedEditors.every(opened => opened.uri.toString() === targetUri.toString()));
+        assert.ok(harness.window.openedEditors.every(
+            opened => opened.editor.selection.isEqual(new vscode.Selection(8, 3, 8, 11)),
+        ));
+        assert.equal(harness.window.warnings.length, 0);
+        harness.controller.dispose();
+    });
+
+    test('rejects attribute kind-prefix-shape-qualifier and sidecar inconsistencies atomically', async () => {
+        const harness = createGraphicalViewHarness();
+        const document = track(harness, '/tmp/attribute-validation.ttl');
+        await harness.controller.openGraphicalView(document);
+        const good = successfulResult(document);
+        harness.client.requests[0].deferred.resolve(good);
+        await flushPromises();
+        const base = {
+            id: 'gv-attribute-0123456789abcdef',
+            kind: 'attributeRow' as const,
+            ownerUrn: 'urn:samm:example.graphical:1.0.0#Aspect',
+            predicateUrn: 'urn:samm:org.eclipse.esmf.samm:meta-model:2.2.0#description',
+            selection: 'singleOccurrence' as const,
+            language: 'en',
+        };
+        const candidates: unknown[] = [
+            {...base, id: 'gv-header-0123456789abcdef'},
+            {...base, ownerUrn: 'Aspect'},
+            {...base, predicateUrn: 'description'},
+            {...base, selection: 'predicateStart', language: 'en'},
+            {...base, language: 'EN'},
+            {...base, sourceText: 'forbidden'},
+        ];
+        for (const target of candidates) {
+            harness.panels.panels[0].emitMessage({type: 'refresh'});
+            const id = (target as {id: string}).id;
+            harness.client.requests.at(-1)?.deferred.resolve({
+                uri: document.uri.toString(),
+                svg: `<svg><g id="${id}"><text>row</text></g></svg>`,
+                targets: [target] as never,
+                warnings: [],
+            });
+            await flushPromises();
+            assert.equal(harness.controller.getPanelState(document.uri.toString())?.lastSuccess?.svg, good.svg);
+        }
+        harness.controller.dispose();
+    });
+
+    test('falls back once to legacy header-only render on InvalidParams and exposes the compatibility limitation', async () => {
+        const harness = createGraphicalViewHarness();
+        const document = track(harness, '/tmp/legacy-server.ttl');
+        await harness.controller.openGraphicalView(document);
+        harness.client.requests[0].deferred.reject({code: -32602, message: 'Invalid params'});
+        await flushPromises();
+        assert.equal(harness.client.requests.length, 2);
+        assert.deepEqual(harness.client.requests[1].params, {uri: document.uri.toString()});
+        harness.client.requests[1].deferred.resolve(successfulResult(document));
+        await flushPromises();
+        const state = harness.controller.getPanelState(document.uri.toString());
+        assert.equal(state?.lastSuccess?.attributeRowsAvailable, false);
+        assert.match(state?.status.message ?? '', /header navigation only/i);
+        harness.controller.dispose();
+    });
+
+    test('rejects attribute targets returned by the legacy header-only fallback', async () => {
+        const harness = createGraphicalViewHarness();
+        const document = track(harness, '/tmp/invalid-legacy-server.ttl');
+        await harness.controller.openGraphicalView(document);
+        harness.client.requests[0].deferred.reject({code: -32602, message: 'Invalid params'});
+        await flushPromises();
+        const attributeId = 'gv-attribute-0123456789abcdef';
+        harness.client.requests[1].deferred.resolve({
+            uri: document.uri.toString(),
+            svg: `<svg><g id="${attributeId}"><text>row</text></g></svg>`,
+            targets: [{
+                id: attributeId,
+                kind: 'attributeRow',
+                ownerUrn: 'urn:samm:example.graphical:1.0.0#Aspect',
+                predicateUrn: 'urn:samm:org.eclipse.esmf.samm:meta-model:2.2.0#description',
+                selection: 'singleOccurrence',
+                language: 'en',
+            }],
+            warnings: [],
+        });
+        await flushPromises();
+        const state = harness.controller.getPanelState(document.uri.toString());
+        assert.equal(state?.lastSuccess, undefined);
+        assert.equal(state?.status.kind, 'stale');
+        assert.equal(state?.status.reason, 'invalidResponse');
         harness.controller.dispose();
     });
 

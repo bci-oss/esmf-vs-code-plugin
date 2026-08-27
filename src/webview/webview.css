@@ -89,7 +89,19 @@ body {
     display: block;
 }
 
-#diagram svg g[id^="gv-header-"] {
+#diagram svg g[id^="gv-header-"],
+#diagram svg g[id^="gv-attribute-"] {
     cursor: pointer;
     pointer-events: all;
+}
+
+#diagram svg g[id^="gv-header-"]:hover,
+#diagram svg g[id^="gv-attribute-"]:hover {
+    filter: brightness(0.94);
+}
+
+#diagram svg g[id^="gv-header-"]:focus-visible,
+#diagram svg g[id^="gv-attribute-"]:focus-visible {
+    outline: 2px solid var(--vscode-focusBorder);
+    outline-offset: 2px;
 }

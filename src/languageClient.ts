@@ -18,10 +18,13 @@ import {LanguageClient, LanguageClientOptions, State, StateChangeEvent, StreamIn
 import type { RequestClient } from './aspectValidation';
 import {
     GRAPHICAL_VIEW_RENDER_REQUEST,
+    GRAPHICAL_VIEW_RESOLVE_ATTRIBUTE_TARGET_REQUEST,
     GRAPHICAL_VIEW_RESOLVE_TARGET_REQUEST,
     GraphicalViewRenderParams,
     GraphicalViewRenderResult,
     GraphicalViewRequestClient,
+    GraphicalViewResolveAttributeTargetParams,
+    GraphicalViewResolveAttributeTargetResult,
     GraphicalViewResolveTargetParams,
     GraphicalViewResolveTargetResult,
 } from './graphicalViewProtocol';
@@ -153,6 +156,17 @@ export class TurtleLanguageClient implements RequestClient, GraphicalViewRequest
         token?: vscode.CancellationToken,
     ): Promise<GraphicalViewResolveTargetResult> {
         return this.sendRequest<GraphicalViewResolveTargetResult>(GRAPHICAL_VIEW_RESOLVE_TARGET_REQUEST, params, token);
+    }
+
+    resolveGraphicalViewAttributeTarget(
+        params: GraphicalViewResolveAttributeTargetParams,
+        token?: vscode.CancellationToken,
+    ): Promise<GraphicalViewResolveAttributeTargetResult> {
+        return this.sendRequest<GraphicalViewResolveAttributeTargetResult>(
+            GRAPHICAL_VIEW_RESOLVE_ATTRIBUTE_TARGET_REQUEST,
+            params,
+            token,
+        );
     }
 
 }

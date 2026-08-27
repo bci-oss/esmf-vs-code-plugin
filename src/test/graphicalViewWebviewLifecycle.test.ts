@@ -17,7 +17,9 @@ import * as vscode from 'vscode';
 import {createGraphicalViewPanelOptions, createShellHtml} from '../graphicalViewPanel';
 
 const FIRST_MARKER = 'gv-header-aaaaaaaaaaaaaaaa';
-const SECOND_MARKER = 'gv-header-bbbbbbbbbbbbbbbb';
+const SECOND_MARKER = 'gv-attribute-bbbbbbbbbbbbbbbb';
+const WRAPPED_SEE_FIRST_MARKER = 'gv-attribute-cccccccccccccccc';
+const WRAPPED_SEE_CONTINUATION_MARKER = 'gv-attribute-dddddddddddddddd';
 
 suite('GraphicalView real webview lifecycle', function () {
     this.timeout(30_000);
@@ -102,6 +104,29 @@ suite('GraphicalView real webview lifecycle', function () {
             await panel.webview.postMessage({type: 'testClickMarker', targetId: SECOND_MARKER});
             await waitFor(() => navigationMessages(messages).length === 2, 'replacement marker click');
             assert.deepEqual(navigationMessages(messages)[1], {type: 'navigate', version: 2, targetId: SECOND_MARKER});
+            await panel.webview.postMessage({type: 'testKeyMarker', targetId: SECOND_MARKER, key: 'Enter'});
+            await waitFor(() => navigationMessages(messages).length === 3, 'attribute marker Enter activation');
+            await panel.webview.postMessage({type: 'testKeyMarker', targetId: SECOND_MARKER, key: ' '});
+            await waitFor(() => navigationMessages(messages).length === 4, 'attribute marker Space activation');
+            assert.deepEqual(navigationMessages(messages).slice(2), [
+                {type: 'navigate', version: 2, targetId: SECOND_MARKER},
+                {type: 'navigate', version: 2, targetId: SECOND_MARKER},
+            ]);
+
+            await panel.webview.postMessage({
+                type: 'render',
+                version: 3,
+                svg: wrappedSeeSvg(WRAPPED_SEE_FIRST_MARKER, WRAPPED_SEE_CONTINUATION_MARKER),
+            });
+            await waitFor(() => hasMessage(messages, 'rendered', 3), 'wrapped see render');
+            await panel.webview.postMessage({type: 'testClickMarker', targetId: WRAPPED_SEE_FIRST_MARKER});
+            await waitFor(() => navigationMessages(messages).length === 5, 'wrapped see first-row click');
+            await panel.webview.postMessage({type: 'testClickMarker', targetId: WRAPPED_SEE_CONTINUATION_MARKER});
+            await waitFor(() => navigationMessages(messages).length === 6, 'wrapped see continuation-row click');
+            assert.deepEqual(navigationMessages(messages).slice(4), [
+                {type: 'navigate', version: 3, targetId: WRAPPED_SEE_FIRST_MARKER},
+                {type: 'navigate', version: 3, targetId: WRAPPED_SEE_CONTINUATION_MARKER},
+            ]);
             assert.equal(
                 messages.some(message => isRecord(message) && message.type === 'renderError'),
                 false,
@@ -122,6 +147,15 @@ function graphperSvg(marker: string): string {
 <text id="${marker}_text_0" x="1100" y="800" fill="#000000" font-family="Arial" font-size="12" text-anchor="middle">Aspect</text>
 <title>Aspect</title>
 </g>
+</g>
+</svg>`;
+}
+
+function wrappedSeeSvg(firstMarker: string, continuationMarker: string): string {
+    return `<svg xmlns="http://www.w3.org/2000/svg" height="1600pt" width="2200pt" viewBox="0 0 2200 1600">
+<g id="graph_root" class="graph" transform="scale(1 1) rotate(0)">
+<g id="${firstMarker}" class="node"><polygon points="10,10 2190,10 2190,700 10,700"></polygon><text x="20" y="300">see: urn:irdi:0173:1:02:AAO677:002,</text></g>
+<g id="${continuationMarker}" class="node"><polygon points="10,710 2190,710 2190,1590 10,1590"></polygon><text x="20" y="1000">urn:irdi:0173:1:02:AAO677:003</text></g>
 </g>
 </svg>`;
 }

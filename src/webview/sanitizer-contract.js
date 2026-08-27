@@ -26,7 +26,7 @@
     const ALLOWED_ATTRIBUTES = Object.freeze(
         Array.from(new Set(Object.values(TAG_ATTRIBUTES).flatMap(attributes => Array.from(attributes)))),
     );
-    const MARKER_PATTERN = /^gv-header-[a-z0-9]{16,32}$/;
+    const MARKER_PATTERN = /^gv-(?:header|attribute)-[a-z0-9]{16,32}$/;
     const COLOR_PATTERN = /^(?:none|#[0-9a-f]{6})$/i;
     const FONT_FAMILIES = new Set(['Arial', 'Roboto Condensed']);
     const NUMBER = '[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?';

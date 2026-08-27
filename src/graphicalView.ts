@@ -38,6 +38,7 @@ export interface GraphicalViewAcceptedResult {
     readonly targets: readonly Readonly<GraphicalViewTarget>[];
     readonly warnings: readonly GraphicalViewRenderWarning[];
     readonly targetById: ReadonlyMap<string, Readonly<GraphicalViewTarget>>;
+    readonly attributeRowsAvailable: boolean;
 }
 
 export type GraphicalViewDelivery =
@@ -354,13 +355,23 @@ export class GraphicalViewController implements vscode.Disposable {
         this.setStatus(state, Object.freeze({kind: 'loading', message: `Rendering graphical view (${trigger})...`}));
 
         try {
-            const result = await client.renderGraphicalView({uri: sourceUri}, cancellation.token);
+            let attributeRowsAvailable = true;
+            let result: GraphicalViewRenderResult;
+            try {
+                result = await client.renderGraphicalView({uri: sourceUri, includeAttributeRows: true}, cancellation.token);
+            } catch (error) {
+                if (!isInvalidParams(error) || !this.isCurrentRequest(state, sourceUri, sequence, cancellation)) {
+                    throw error;
+                }
+                attributeRowsAvailable = false;
+                result = await client.renderGraphicalView({uri: sourceUri}, cancellation.token);
+            }
             if (!this.isCurrentRequest(state, sourceUri, sequence, cancellation)) {
                 return;
             }
             state.cancellation = undefined;
             cancellation.dispose();
-            this.handleRenderResult(state, result, sequence);
+            this.handleRenderResult(state, result, sequence, attributeRowsAvailable);
         } catch (error) {
             if (!this.isCurrentRequest(state, sourceUri, sequence, cancellation)) {
                 return;
@@ -371,7 +382,12 @@ export class GraphicalViewController implements vscode.Disposable {
         }
     }
 
-    private handleRenderResult(state: PanelState, result: unknown, requestSequence: number): void {
+    private handleRenderResult(
+        state: PanelState,
+        result: unknown,
+        requestSequence: number,
+        attributeRowsAvailable: boolean,
+    ): void {
         if (!isGraphicalViewRenderResult(result)) {
             this.setStale(state, 'invalidResponse', 'The language server returned an invalid graphical-view response.');
             return;
@@ -382,12 +398,17 @@ export class GraphicalViewController implements vscode.Disposable {
             return;
         }
 
+        if (!attributeRowsAvailable && result.targets.some(target => target.kind !== 'elementHeader')) {
+            this.setStale(state, 'invalidResponse', 'The legacy language server returned an invalid graphical-view response.');
+            return;
+        }
+
         if (result.svg === undefined || result.svg === null) {
             this.handleWarningResult(state, result.warnings);
             return;
         }
 
-        const accepted = createAcceptedResult(result, result.svg, ++state.nextDisplayVersion);
+        const accepted = createAcceptedResult(result, result.svg, ++state.nextDisplayVersion, attributeRowsAvailable);
         state.pendingDelivery = Object.freeze({accepted, requestSequence});
         state.panel.deliver(Object.freeze({type: 'render', version: accepted.version, svg: accepted.svg}));
     }
@@ -399,7 +420,12 @@ export class GraphicalViewController implements vscode.Disposable {
             state.lastSuccess = pending.accepted;
             state.pendingDelivery = undefined;
             if (state.sequence === pending.requestSequence) {
-                this.setStatus(state, Object.freeze({kind: 'ready', message: 'Graphical view is up to date.'}));
+                this.setStatus(state, Object.freeze({
+                    kind: 'ready',
+                    message: pending.accepted.attributeRowsAvailable
+                        ? 'Graphical view is up to date.'
+                        : 'The server supports header navigation only; attribute-row navigation is unavailable.',
+                }));
             }
             return;
         }
@@ -428,7 +454,7 @@ export class GraphicalViewController implements vscode.Disposable {
     ): Promise<void> {
         const accepted = state.lastSuccess;
         const target = accepted?.version === message.version ? accepted.targetById.get(message.targetId) : undefined;
-        if (!accepted || !target || target.kind !== 'elementHeader' || !GRAPHICAL_VIEW_MARKER_PATTERN.test(message.targetId)) {
+        if (!accepted || !target || !GRAPHICAL_VIEW_MARKER_PATTERN.test(message.targetId)) {
             return;
         }
 
@@ -442,10 +468,21 @@ export class GraphicalViewController implements vscode.Disposable {
         const cancellation = this.createCancellationSource();
         state.navigationCancellation = cancellation;
         try {
-            const response = await client.resolveGraphicalViewTarget(
-                {sourceUri: state.sourceUri, elementUrn: target.elementUrn},
-                cancellation.token,
-            );
+            const response = target.kind === 'elementHeader'
+                ? await client.resolveGraphicalViewTarget(
+                    {sourceUri: state.sourceUri, elementUrn: target.elementUrn},
+                    cancellation.token,
+                )
+                : await client.resolveGraphicalViewAttributeTarget(
+                    {
+                        sourceUri: state.sourceUri,
+                        ownerUrn: target.ownerUrn,
+                        predicateUrn: target.predicateUrn,
+                        selection: target.selection,
+                        ...(target.language === undefined ? {} : {language: target.language}),
+                    },
+                    cancellation.token,
+                );
             if (!this.isCurrentNavigation(state, accepted, target, cancellation)) {
                 return;
             }
@@ -643,11 +680,16 @@ export class GraphicalViewController implements vscode.Disposable {
     }
 }
 
-function createAcceptedResult(result: GraphicalViewRenderResult, svg: string, version: number): GraphicalViewAcceptedResult {
+function createAcceptedResult(
+    result: GraphicalViewRenderResult,
+    svg: string,
+    version: number,
+    attributeRowsAvailable: boolean,
+): GraphicalViewAcceptedResult {
     const targets = Object.freeze(result.targets.map(target => Object.freeze({...target})));
     const warnings = Object.freeze([...result.warnings]);
     const targetById = new ImmutableTargetMap(targets.map(target => [target.id, target]));
-    return Object.freeze({version, uri: result.uri, svg, targets, warnings, targetById});
+    return Object.freeze({version, uri: result.uri, svg, targets, warnings, targetById, attributeRowsAvailable});
 }
 
 class ImmutableTargetMap<K, V> implements ReadonlyMap<K, V> {
@@ -861,6 +903,10 @@ function isMethodNotFound(error: unknown): boolean {
         return true;
     }
     return error instanceof Error && /method\s+not\s+found/i.test(error.message);
+}
+
+function isInvalidParams(error: unknown): boolean {
+    return isRecord(error) && error.code === -32602;
 }
 
 function classifyFailure(message: string): string {

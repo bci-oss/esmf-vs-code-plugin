@@ -25,7 +25,10 @@ import {
 import {
     GraphicalViewRenderParams,
     GraphicalViewRenderResult,
+    GraphicalViewElementHeaderTarget,
     GraphicalViewRequestClient,
+    GraphicalViewResolveAttributeTargetParams,
+    GraphicalViewResolveAttributeTargetResult,
     GraphicalViewResolveTargetParams,
     GraphicalViewResolveTargetResult,
 } from '../graphicalViewProtocol';
@@ -42,9 +45,15 @@ export interface RecordedResolveRequest {
     readonly token: vscode.CancellationToken | undefined;
 }
 
+export interface RecordedAttributeResolveRequest {
+    readonly params: GraphicalViewResolveAttributeTargetParams;
+    readonly token: vscode.CancellationToken | undefined;
+}
+
 export class FakeGraphicalViewClient implements GraphicalViewRequestClient {
     readonly requests: RecordedRenderRequest[] = [];
     readonly resolveRequests: RecordedResolveRequest[] = [];
+    readonly attributeResolveRequests: RecordedAttributeResolveRequest[] = [];
     resolveResult: GraphicalViewResolveTargetResult = {location: null, warning: 'temporarilyUnresolvable'};
     resolveFailure: unknown | undefined;
     private readonly listeners = new Set<(available: boolean) => void>();
@@ -71,6 +80,14 @@ export class FakeGraphicalViewClient implements GraphicalViewRequestClient {
         token?: vscode.CancellationToken,
     ): Promise<GraphicalViewResolveTargetResult> {
         this.resolveRequests.push({params, token});
+        return this.resolveFailure === undefined ? Promise.resolve(this.resolveResult) : Promise.reject(this.resolveFailure);
+    }
+
+    resolveGraphicalViewAttributeTarget(
+        params: GraphicalViewResolveAttributeTargetParams,
+        token?: vscode.CancellationToken,
+    ): Promise<GraphicalViewResolveAttributeTargetResult> {
+        this.attributeResolveRequests.push({params, token});
         return this.resolveFailure === undefined ? Promise.resolve(this.resolveResult) : Promise.reject(this.resolveFailure);
     }
 
@@ -186,7 +203,10 @@ export function createGraphicalViewDocument(filePath: string, languageId = 'turt
     return {languageId, uri: vscode.Uri.file(filePath)};
 }
 
-export function successfulResult(document: GraphicalViewDocument, suffix = '0123456789abcdef'): GraphicalViewRenderResult {
+export function successfulResult(
+    document: GraphicalViewDocument,
+    suffix = '0123456789abcdef',
+): GraphicalViewRenderResult & {targets: [GraphicalViewElementHeaderTarget]} {
     const id = `gv-header-${suffix}`;
     return {
         uri: document.uri.toString(),
