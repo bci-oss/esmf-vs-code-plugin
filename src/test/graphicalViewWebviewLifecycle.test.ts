@@ -154,7 +154,7 @@ function graphperSvg(marker: string): string {
 function wrappedSeeSvg(firstMarker: string, continuationMarker: string): string {
     return `<svg xmlns="http://www.w3.org/2000/svg" height="1600pt" width="2200pt" viewBox="0 0 2200 1600">
 <g id="graph_root" class="graph" transform="scale(1 1) rotate(0)">
-<g id="${firstMarker}" class="node"><polygon points="10,10 2190,10 2190,700 10,700"></polygon><text x="20" y="300">see: urn:irdi:0173:1:02:AAO677:002,</text></g>
+<g id="${firstMarker}" class="node"><polygon points="10,10 2190,10 2190,700 10,700"></polygon><text x="20" y="300">see: https://example.test/reference/with/a/long/path,</text></g>
 <g id="${continuationMarker}" class="node"><polygon points="10,710 2190,710 2190,1590 10,1590"></polygon><text x="20" y="1000">urn:irdi:0173:1:02:AAO677:003</text></g>
 </g>
 </svg>`;

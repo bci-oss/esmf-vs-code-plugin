@@ -455,7 +455,7 @@ suite('GraphicalViewController', () => {
         };
         const result: GraphicalViewRenderResult = {
             uri: document.uri.toString(),
-            svg: `<svg><g id="${ids[0]}"><text>see: urn:irdi:0173:1:02:AAO677:002,</text></g>`
+            svg: `<svg><g id="${ids[0]}"><text>see: https://example.test/reference/with/a/long/path,</text></g>`
                 + `<g id="${ids[1]}"><text>urn:irdi:0173:1:02:AAO677:003</text></g></svg>`,
             targets: ids.map(id => ({id, ...locator})),
             warnings: [],
