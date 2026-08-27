@@ -14,6 +14,7 @@
 import * as assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
+import * as vscode from 'vscode';
 import {OPEN_GRAPHICAL_VIEW_COMMAND} from '../graphicalView';
 import {GraphicalViewRenderResult} from '../graphicalViewProtocol';
 import {
@@ -264,6 +265,215 @@ suite('GraphicalViewController', () => {
             assert.equal(state?.lastSuccess?.svg, accepted.svg);
             assert.equal(state?.lastSuccess?.targetById.has(accepted.targets[0].id), true);
         }
+        harness.controller.dispose();
+    });
+
+    test('commits a sidecar only after secure render confirmation and retains last-good state on render rejection', async () => {
+        const harness = createGraphicalViewHarness();
+        const document = track(harness, '/tmp/secure-render.ttl');
+        await harness.controller.openGraphicalView(document);
+        const first = successfulResult(document, 'aaaaaaaaaaaaaaaa');
+        harness.client.requests[0].deferred.resolve(first);
+        await flushPromises();
+        const retained = harness.controller.getPanelState(document.uri.toString())?.lastSuccess;
+        assert.equal(retained?.version, 1);
+
+        const panel = harness.panels.panels[0];
+        panel.renderOutcome = 'failure';
+        panel.emitMessage({type: 'refresh'});
+        const rejected = successfulResult(document, 'bbbbbbbbbbbbbbbb');
+        harness.client.requests[1].deferred.resolve(rejected);
+        await flushPromises();
+
+        const state = harness.controller.getPanelState(document.uri.toString());
+        assert.equal(state?.status.kind, 'stale');
+        assert.equal(state?.lastSuccess, retained);
+        assert.equal(state?.lastSuccess?.targetById.has(first.targets[0].id), true);
+        assert.equal(state?.lastSuccess?.targetById.has(rejected.targets[0].id), false);
+        harness.controller.dispose();
+    });
+
+    test('late acknowledgement for delivered A establishes its sidecar without overwriting loading state for B', async () => {
+        const harness = createGraphicalViewHarness();
+        const document = track(harness, '/tmp/delayed-render-ack-loading.ttl');
+        await harness.controller.openGraphicalView(document);
+        const panel = harness.panels.panels[0];
+        panel.renderOutcome = 'none';
+
+        harness.client.requests[0].deferred.resolve(successfulResult(document, 'aaaaaaaaaaaaaaaa'));
+        await flushPromises();
+        panel.emitMessage({type: 'refresh'});
+        const loadingB = harness.controller.getPanelState(document.uri.toString())?.status;
+
+        panel.emitMessage({type: 'rendered', version: 1});
+        const state = harness.controller.getPanelState(document.uri.toString());
+        assert.equal(state?.lastSuccess?.version, 1);
+        assert.equal(state?.status, loadingB);
+        assert.equal(state?.status.kind, 'loading');
+        harness.controller.dispose();
+    });
+
+    test('late acknowledgement for delivered A establishes its sidecar without overwriting failed state for B', async () => {
+        const harness = createGraphicalViewHarness();
+        const document = track(harness, '/tmp/delayed-render-ack-stale.ttl');
+        await harness.controller.openGraphicalView(document);
+        const panel = harness.panels.panels[0];
+        panel.renderOutcome = 'none';
+
+        harness.client.requests[0].deferred.resolve(successfulResult(document, 'aaaaaaaaaaaaaaaa'));
+        await flushPromises();
+        panel.emitMessage({type: 'refresh'});
+        harness.client.requests[1].deferred.reject(new Error('render B failed'));
+        await flushPromises();
+        const failedB = harness.controller.getPanelState(document.uri.toString())?.status;
+
+        panel.emitMessage({type: 'rendered', version: 1});
+        const state = harness.controller.getPanelState(document.uri.toString());
+        assert.equal(state?.lastSuccess?.version, 1);
+        assert.equal(state?.status, failedB);
+        assert.equal(state?.status.kind, 'stale');
+        harness.controller.dispose();
+    });
+
+    test('rehydrates the current version through ready without an LSP render or shell reset', async () => {
+        const harness = createGraphicalViewHarness();
+        const document = track(harness, '/tmp/rehydrate.ttl');
+        await harness.controller.openGraphicalView(document);
+        harness.client.requests[0].deferred.resolve(successfulResult(document));
+        await flushPromises();
+        const panel = harness.panels.panels[0];
+        const renderCount = panel.deliveries.filter(delivery => delivery.type === 'render').length;
+
+        panel.emitMessage({type: 'ready'});
+        assert.equal(harness.client.requests.length, 1);
+        assert.equal(panel.deliveries.filter(delivery => delivery.type === 'render').length, renderCount + 1);
+        assert.equal(harness.controller.getPanelState(document.uri.toString())?.lastSuccess?.version, 1);
+
+        panel.renderOutcome = 'failure';
+        panel.emitMessage({type: 'refresh'});
+        harness.client.requests[1].deferred.resolve(successfulResult(document, 'bbbbbbbbbbbbbbbb'));
+        await flushPromises();
+        assert.equal(harness.controller.getPanelState(document.uri.toString())?.status.kind, 'stale');
+
+        panel.renderOutcome = 'success';
+        panel.emitMessage({type: 'ready'});
+        assert.equal(harness.client.requests.length, 2);
+        assert.equal(harness.controller.getPanelState(document.uri.toString())?.lastSuccess?.version, 1);
+        assert.equal(harness.controller.getPanelState(document.uri.toString())?.status.kind, 'stale');
+        harness.controller.dispose();
+    });
+
+    test('resolves a current sidecar-backed marker and opens, selects, and reveals only its local file location', async () => {
+        const harness = createGraphicalViewHarness();
+        const document = track(harness, '/tmp/navigation-source.ttl');
+        await harness.controller.openGraphicalView(document);
+        const result = successfulResult(document);
+        harness.client.requests[0].deferred.resolve(result);
+        await flushPromises();
+        const targetUri = vscode.Uri.file('/tmp/navigation-target.ttl');
+        harness.client.resolveResult = {
+            location: {
+                uri: targetUri.toString(),
+                range: {start: {line: 3, character: 4}, end: {line: 5, character: 6}},
+            },
+        };
+
+        harness.panels.panels[0].emitMessage({type: 'navigate', version: 1, targetId: result.targets[0].id});
+        await flushPromises();
+        await flushPromises();
+
+        assert.deepEqual(harness.client.resolveRequests[0].params, {
+            sourceUri: document.uri.toString(),
+            elementUrn: result.targets[0].elementUrn,
+        });
+        assert.equal(harness.client.resolveRequests[0].token?.isCancellationRequested, false);
+        assert.equal(harness.window.openedEditors[0].uri.toString(), targetUri.toString());
+        assert.equal(harness.window.openedEditors[0].options?.preview, false);
+        assert.deepEqual(harness.window.openedEditors[0].editor.selection.start, new vscode.Position(3, 4));
+        assert.deepEqual(harness.window.openedEditors[0].editor.selection.end, new vscode.Position(5, 6));
+        assert.deepEqual(harness.window.openedEditors[0].revealedRanges[0], new vscode.Range(3, 4, 5, 6));
+        harness.controller.dispose();
+    });
+
+    test('rejects malformed, stale, fake, extra-field, and non-sidecar navigation before LSP resolution', async () => {
+        const harness = createGraphicalViewHarness();
+        const document = track(harness, '/tmp/rejected-navigation.ttl');
+        await harness.controller.openGraphicalView(document);
+        const first = successfulResult(document, 'aaaaaaaaaaaaaaaa');
+        harness.client.requests[0].deferred.resolve(first);
+        await flushPromises();
+
+        const rejectedMessages: unknown[] = [
+            {type: 'navigate', targetId: first.targets[0].id},
+            {type: 'navigate', version: 1, targetId: first.targets[0].id, uri: 'file:///tmp/evil.ttl'},
+            {type: 'navigate', version: 1, targetId: 'gv-header-bbbbbbbbbbbbbbbb'},
+            {type: 'navigate', version: 1, targetId: 'bad-marker'},
+            {type: 'navigate', version: 1.5, targetId: first.targets[0].id},
+            {type: 'navigate', version: '1', targetId: first.targets[0].id},
+            {type: 'navigate', version: 1, targetId: first.targets[0].id, elementUrn: first.targets[0].elementUrn},
+        ];
+        for (const message of rejectedMessages) {
+            harness.panels.panels[0].emitMessage(message);
+        }
+
+        harness.panels.panels[0].emitMessage({type: 'refresh'});
+        const second = successfulResult(document, 'cccccccccccccccc');
+        harness.client.requests[1].deferred.resolve(second);
+        await flushPromises();
+        harness.panels.panels[0].emitMessage({type: 'navigate', version: 1, targetId: first.targets[0].id});
+        assert.equal(harness.client.resolveRequests.length, 0);
+        assert.equal(harness.window.openedEditors.length, 0);
+        harness.controller.dispose();
+    });
+
+    test('blocks warning, malformed, invalid-range, non-file, resolver-failure, and editor-open navigation paths', async () => {
+        const harness = createGraphicalViewHarness();
+        const document = track(harness, '/tmp/navigation-failures.ttl');
+        await harness.controller.openGraphicalView(document);
+        const result = successfulResult(document);
+        harness.client.requests[0].deferred.resolve(result);
+        await flushPromises();
+        const navigate = async () => {
+            harness.panels.panels[0].emitMessage({type: 'navigate', version: 1, targetId: result.targets[0].id});
+            await flushPromises();
+            await flushPromises();
+        };
+
+        for (const warning of ['notFound', 'ambiguous', 'unsupportedUri', 'temporarilyUnresolvable'] as const) {
+            harness.client.resolveResult = {location: null, warning};
+            await navigate();
+        }
+        harness.client.resolveResult = {
+            location: {
+                uri: 'https://example.invalid/model.ttl',
+                range: {start: {line: 0, character: 0}, end: {line: 0, character: 1}},
+            },
+        };
+        await navigate();
+        harness.client.resolveResult = {
+            location: {
+                uri: vscode.Uri.file('/tmp/invalid-range.ttl').toString(),
+                range: {start: {line: 2, character: 0}, end: {line: 1, character: 0}},
+            },
+        };
+        await navigate();
+        harness.client.resolveResult = {location: null, warning: null};
+        await navigate();
+        harness.client.resolveFailure = new Error('hostile resolver detail');
+        await navigate();
+        harness.client.resolveFailure = undefined;
+        harness.client.resolveResult = {
+            location: {
+                uri: vscode.Uri.file('/tmp/open-failure.ttl').toString(),
+                range: {start: {line: 0, character: 0}, end: {line: 0, character: 1}},
+            },
+        };
+        harness.window.showTextDocumentFailure = new Error('hostile editor detail');
+        await navigate();
+
+        assert.equal(harness.window.openedEditors.length, 0);
+        assert.equal(harness.window.warnings.length, 9);
+        assert.ok(harness.window.warnings.every(message => !message.includes('hostile')));
         harness.controller.dispose();
     });
 

@@ -37,8 +37,16 @@ export interface RecordedRenderRequest {
     readonly deferred: Deferred<GraphicalViewRenderResult>;
 }
 
+export interface RecordedResolveRequest {
+    readonly params: GraphicalViewResolveTargetParams;
+    readonly token: vscode.CancellationToken | undefined;
+}
+
 export class FakeGraphicalViewClient implements GraphicalViewRequestClient {
     readonly requests: RecordedRenderRequest[] = [];
+    readonly resolveRequests: RecordedResolveRequest[] = [];
+    resolveResult: GraphicalViewResolveTargetResult = {location: null, warning: 'temporarilyUnresolvable'};
+    resolveFailure: unknown | undefined;
     private readonly listeners = new Set<(available: boolean) => void>();
 
     constructor(private available = true) {}
@@ -59,10 +67,11 @@ export class FakeGraphicalViewClient implements GraphicalViewRequestClient {
     }
 
     resolveGraphicalViewTarget(
-        _params: GraphicalViewResolveTargetParams,
-        _token?: vscode.CancellationToken,
+        params: GraphicalViewResolveTargetParams,
+        token?: vscode.CancellationToken,
     ): Promise<GraphicalViewResolveTargetResult> {
-        return Promise.resolve({location: null, warning: 'temporarilyUnresolvable'});
+        this.resolveRequests.push({params, token});
+        return this.resolveFailure === undefined ? Promise.resolve(this.resolveResult) : Promise.reject(this.resolveFailure);
     }
 
     setAvailable(available: boolean): void {
@@ -78,6 +87,7 @@ export class FakeGraphicalViewPanel implements GraphicalViewPanelAdapter {
     revealCount = 0;
     disposeCount = 0;
     disposedListenerCount = 0;
+    renderOutcome: 'success' | 'failure' | 'none' = 'success';
     private readonly disposeListeners = new Set<() => void>();
     private readonly visibilityListeners = new Set<(visible: boolean) => void>();
     private readonly messageListeners = new Set<(message: unknown) => void>();
@@ -91,6 +101,13 @@ export class FakeGraphicalViewPanel implements GraphicalViewPanelAdapter {
 
     deliver(delivery: GraphicalViewDelivery): void {
         this.deliveries.push(delivery);
+        if (delivery.type === 'render' && this.renderOutcome !== 'none') {
+            this.emitMessage(
+                this.renderOutcome === 'success'
+                    ? {type: 'rendered', version: delivery.version}
+                    : {type: 'renderError', version: delivery.version, reason: 'sanitizationFailed'},
+            );
+        }
     }
 
     onDidDispose(listener: () => void): vscode.Disposable {
@@ -199,10 +216,30 @@ class FakeCommands implements GraphicalViewCommands {
 class FakeWindow implements GraphicalViewWindow {
     activeTextEditor: {document: GraphicalViewDocument} | undefined;
     readonly warnings: string[] = [];
+    readonly openedEditors: Array<{
+        uri: vscode.Uri;
+        options: vscode.TextDocumentShowOptions | undefined;
+        editor: vscode.TextEditor;
+        revealedRanges: vscode.Range[];
+    }> = [];
+    showTextDocumentFailure: unknown | undefined;
 
     showWarningMessage(message: string): Promise<unknown> {
         this.warnings.push(message);
         return Promise.resolve(undefined);
+    }
+
+    showTextDocument(uri: vscode.Uri, options?: vscode.TextDocumentShowOptions): Promise<vscode.TextEditor> {
+        if (this.showTextDocumentFailure !== undefined) {
+            return Promise.reject(this.showTextDocumentFailure);
+        }
+        const revealedRanges: vscode.Range[] = [];
+        const editor = {
+            selection: new vscode.Selection(0, 0, 0, 0),
+            revealRange: (range: vscode.Range) => revealedRanges.push(range),
+        } as unknown as vscode.TextEditor;
+        this.openedEditors.push({uri, options, editor, revealedRanges});
+        return Promise.resolve(editor);
     }
 }
 

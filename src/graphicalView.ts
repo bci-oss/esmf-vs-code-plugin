@@ -14,6 +14,7 @@
 import * as vscode from 'vscode';
 import type {ExtensionLogger} from './outputChannel';
 import {
+    GRAPHICAL_VIEW_MARKER_PATTERN,
     GraphicalViewRenderResult,
     GraphicalViewRenderWarning,
     GraphicalViewRequestClient,
@@ -31,6 +32,7 @@ export type GraphicalViewStatus =
     | Readonly<{kind: 'disconnected'; message: string}>;
 
 export interface GraphicalViewAcceptedResult {
+    readonly version: number;
     readonly uri: string;
     readonly svg: string;
     readonly targets: readonly Readonly<GraphicalViewTarget>[];
@@ -39,10 +41,15 @@ export interface GraphicalViewAcceptedResult {
 }
 
 export type GraphicalViewDelivery =
-    | Readonly<{type: 'status'; uri: string; status: GraphicalViewStatus}>
-    | Readonly<{type: 'render'; uri: string; svg: string; warnings: readonly GraphicalViewRenderWarning[]}>;
+    | Readonly<{type: 'status'; status: GraphicalViewStatus}>
+    | Readonly<{type: 'render'; version: number; svg: string}>;
 
-export type GraphicalViewPanelMessage = Readonly<{type: 'ready'}> | Readonly<{type: 'refresh'}> | Readonly<{type: 'navigate'; targetId: string}>;
+export type GraphicalViewPanelMessage =
+    | Readonly<{type: 'ready'}>
+    | Readonly<{type: 'refresh'}>
+    | Readonly<{type: 'rendered'; version: number}>
+    | Readonly<{type: 'renderError'; version: number; reason: 'sanitizationFailed'}>
+    | Readonly<{type: 'navigate'; version: number; targetId: string}>;
 
 export interface GraphicalViewPanelAdapter extends vscode.Disposable {
     readonly visible: boolean;
@@ -65,6 +72,7 @@ export interface GraphicalViewDocument {
 export interface GraphicalViewWindow {
     readonly activeTextEditor: {readonly document: GraphicalViewDocument} | undefined;
     showWarningMessage(message: string): Thenable<unknown>;
+    showTextDocument(uri: vscode.Uri, options?: vscode.TextDocumentShowOptions): Thenable<vscode.TextEditor>;
 }
 
 export interface GraphicalViewWorkspace {
@@ -99,8 +107,16 @@ interface PanelState {
     visible: boolean;
     disposed: boolean;
     cancellation: vscode.CancellationTokenSource | undefined;
+    navigationCancellation: vscode.CancellationTokenSource | undefined;
+    nextDisplayVersion: number;
     status: GraphicalViewStatus;
     lastSuccess: GraphicalViewAcceptedResult | undefined;
+    pendingDelivery: PendingDelivery | undefined;
+}
+
+interface PendingDelivery {
+    readonly accepted: GraphicalViewAcceptedResult;
+    readonly requestSequence: number;
 }
 
 const DISCONNECTED_STATUS: GraphicalViewStatus = Object.freeze({
@@ -166,8 +182,11 @@ export class GraphicalViewController implements vscode.Disposable {
             visible: panel.visible,
             disposed: false,
             cancellation: undefined,
+            navigationCancellation: undefined,
+            nextDisplayVersion: 0,
             status: Object.freeze({kind: 'loading', message: 'Preparing graphical view...'}),
             lastSuccess: undefined,
+            pendingDelivery: undefined,
         };
         this.panels.set(sourceUri, state);
         state.subscriptions.push(
@@ -272,7 +291,7 @@ export class GraphicalViewController implements vscode.Disposable {
         }
         state.visible = visible;
         if (visible) {
-            this.deliverCurrentState(state);
+            this.deliverStatus(state);
         }
     }
 
@@ -290,8 +309,14 @@ export class GraphicalViewController implements vscode.Disposable {
                     void this.requestRender(state, 'manual');
                 }
                 return;
+            case 'rendered':
+                this.handleRendered(state, message.version);
+                return;
+            case 'renderError':
+                this.handleRenderError(state, message.version);
+                return;
             case 'navigate':
-                // Task 4 validates current-sidecar membership and resolves navigation.
+                void this.navigateToTarget(state, message);
                 return;
         }
     }
@@ -335,7 +360,7 @@ export class GraphicalViewController implements vscode.Disposable {
             }
             state.cancellation = undefined;
             cancellation.dispose();
-            this.handleRenderResult(state, result);
+            this.handleRenderResult(state, result, sequence);
         } catch (error) {
             if (!this.isCurrentRequest(state, sourceUri, sequence, cancellation)) {
                 return;
@@ -346,7 +371,7 @@ export class GraphicalViewController implements vscode.Disposable {
         }
     }
 
-    private handleRenderResult(state: PanelState, result: unknown): void {
+    private handleRenderResult(state: PanelState, result: unknown, requestSequence: number): void {
         if (!isGraphicalViewRenderResult(result)) {
             this.setStale(state, 'invalidResponse', 'The language server returned an invalid graphical-view response.');
             return;
@@ -362,11 +387,127 @@ export class GraphicalViewController implements vscode.Disposable {
             return;
         }
 
-        const accepted = createAcceptedResult(result, result.svg);
-        state.lastSuccess = accepted;
-        state.status = Object.freeze({kind: 'ready', message: 'Graphical view is up to date.'});
-        state.panel.deliver(Object.freeze({type: 'render', uri: accepted.uri, svg: accepted.svg, warnings: accepted.warnings}));
-        this.deliverStatus(state);
+        const accepted = createAcceptedResult(result, result.svg, ++state.nextDisplayVersion);
+        state.pendingDelivery = Object.freeze({accepted, requestSequence});
+        state.panel.deliver(Object.freeze({type: 'render', version: accepted.version, svg: accepted.svg}));
+    }
+
+    private handleRendered(state: PanelState, version: number): void {
+        const pending = state.pendingDelivery;
+        if (pending?.accepted.version === version) {
+            this.cancelNavigation(state);
+            state.lastSuccess = pending.accepted;
+            state.pendingDelivery = undefined;
+            if (state.sequence === pending.requestSequence) {
+                this.setStatus(state, Object.freeze({kind: 'ready', message: 'Graphical view is up to date.'}));
+            }
+            return;
+        }
+
+        // An acknowledgement for a rehydrated last-successful snapshot must not
+        // clear a newer stale/error status.
+    }
+
+    private handleRenderError(state: PanelState, version: number): void {
+        if (state.pendingDelivery?.accepted.version === version) {
+            state.pendingDelivery = undefined;
+        } else if (state.lastSuccess?.version !== version) {
+            return;
+        }
+        this.outputChannel.warn('Graphical view rejected an SVG payload at the secure rendering boundary.');
+        this.setStale(
+            state,
+            'sanitizationFailed',
+            'The new diagram could not be displayed safely. The last successful diagram is retained.',
+        );
+    }
+
+    private async navigateToTarget(
+        state: PanelState,
+        message: Readonly<{type: 'navigate'; version: number; targetId: string}>,
+    ): Promise<void> {
+        const accepted = state.lastSuccess;
+        const target = accepted?.version === message.version ? accepted.targetById.get(message.targetId) : undefined;
+        if (!accepted || !target || target.kind !== 'elementHeader' || !GRAPHICAL_VIEW_MARKER_PATTERN.test(message.targetId)) {
+            return;
+        }
+
+        const client = this.client;
+        if (!client?.isGraphicalViewAvailable()) {
+            await this.warnNavigation('The graphical target is temporarily unavailable because the language server is disconnected.');
+            return;
+        }
+
+        this.cancelNavigation(state);
+        const cancellation = this.createCancellationSource();
+        state.navigationCancellation = cancellation;
+        try {
+            const response = await client.resolveGraphicalViewTarget(
+                {sourceUri: state.sourceUri, elementUrn: target.elementUrn},
+                cancellation.token,
+            );
+            if (!this.isCurrentNavigation(state, accepted, target, cancellation)) {
+                return;
+            }
+            state.navigationCancellation = undefined;
+            cancellation.dispose();
+
+            const resolved = validateResolveTargetResult(response);
+            if (resolved.kind === 'warning') {
+                await this.warnNavigation(resolveWarningMessage(resolved.warning));
+                return;
+            }
+            if (resolved.kind === 'invalid') {
+                await this.warnNavigation('The language server returned an invalid graphical target location.');
+                return;
+            }
+
+            try {
+                const editor = await this.window.showTextDocument(resolved.uri, {preview: false});
+                if (!this.isCurrentNavigationResult(state, accepted, target)) {
+                    return;
+                }
+                const range = new vscode.Range(
+                    resolved.start.line,
+                    resolved.start.character,
+                    resolved.end.line,
+                    resolved.end.character,
+                );
+                editor.selection = new vscode.Selection(range.start, range.end);
+                editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+            } catch (_error) {
+                await this.warnNavigation('The graphical target could not be opened in an editor.');
+            }
+        } catch (_error) {
+            if (this.isCurrentNavigation(state, accepted, target, cancellation)) {
+                state.navigationCancellation = undefined;
+                cancellation.dispose();
+                await this.warnNavigation('The graphical target is temporarily unavailable.');
+            }
+        }
+    }
+
+    private isCurrentNavigation(
+        state: PanelState,
+        accepted: GraphicalViewAcceptedResult,
+        target: Readonly<GraphicalViewTarget>,
+        cancellation: vscode.CancellationTokenSource,
+    ): boolean {
+        return state.navigationCancellation === cancellation && this.isCurrentNavigationResult(state, accepted, target);
+    }
+
+    private isCurrentNavigationResult(
+        state: PanelState,
+        accepted: GraphicalViewAcceptedResult,
+        target: Readonly<GraphicalViewTarget>,
+    ): boolean {
+        return this.isCurrent(state)
+            && state.lastSuccess === accepted
+            && accepted.targetById.get(target.id) === target;
+    }
+
+    private async warnNavigation(message: string): Promise<void> {
+        await this.window.showWarningMessage(message);
     }
 
     private handleWarningResult(state: PanelState, warnings: readonly GraphicalViewRenderWarning[]): void {
@@ -403,7 +544,9 @@ export class GraphicalViewController implements vscode.Disposable {
         }
 
         const detail = error instanceof Error ? error.message : String(error);
-        this.setStale(state, classifyFailure(detail), `Graphical rendering failed: ${detail}. The last successful diagram is retained.`);
+        const reason = classifyFailure(detail);
+        this.outputChannel.warn(`Graphical view render request failed (${reason}).`);
+        this.setStale(state, reason, 'Graphical rendering failed. The last successful diagram is retained.');
     }
 
     private setStale(state: PanelState, reason: string, message: string): void {
@@ -420,14 +563,14 @@ export class GraphicalViewController implements vscode.Disposable {
 
     private deliverCurrentState(state: PanelState): void {
         this.deliverStatus(state);
-        const accepted = state.lastSuccess;
+        const accepted = state.pendingDelivery?.accepted ?? state.lastSuccess;
         if (accepted) {
-            state.panel.deliver(Object.freeze({type: 'render', uri: accepted.uri, svg: accepted.svg, warnings: accepted.warnings}));
+            state.panel.deliver(Object.freeze({type: 'render', version: accepted.version, svg: accepted.svg}));
         }
     }
 
     private deliverStatus(state: PanelState): void {
-        state.panel.deliver(Object.freeze({type: 'status', uri: state.sourceUri, status: state.status}));
+        state.panel.deliver(Object.freeze({type: 'status', status: state.status}));
     }
 
     private invalidate(state: PanelState): void {
@@ -435,12 +578,23 @@ export class GraphicalViewController implements vscode.Disposable {
             return;
         }
         this.cancelCurrent(state);
+        this.cancelNavigation(state);
+        state.pendingDelivery = undefined;
         state.sequence += 1;
     }
 
     private cancelCurrent(state: PanelState): void {
         const cancellation = state.cancellation;
         state.cancellation = undefined;
+        if (cancellation) {
+            cancellation.cancel();
+            cancellation.dispose();
+        }
+    }
+
+    private cancelNavigation(state: PanelState): void {
+        const cancellation = state.navigationCancellation;
+        state.navigationCancellation = undefined;
         if (cancellation) {
             cancellation.cancel();
             cancellation.dispose();
@@ -465,6 +619,7 @@ export class GraphicalViewController implements vscode.Disposable {
             return;
         }
         this.cancelCurrent(state);
+        this.cancelNavigation(state);
         state.sequence += 1;
         state.disposed = true;
         this.panels.delete(state.sourceUri);
@@ -488,11 +643,11 @@ export class GraphicalViewController implements vscode.Disposable {
     }
 }
 
-function createAcceptedResult(result: GraphicalViewRenderResult, svg: string): GraphicalViewAcceptedResult {
+function createAcceptedResult(result: GraphicalViewRenderResult, svg: string, version: number): GraphicalViewAcceptedResult {
     const targets = Object.freeze(result.targets.map(target => Object.freeze({...target})));
     const warnings = Object.freeze([...result.warnings]);
     const targetById = new ImmutableTargetMap(targets.map(target => [target.id, target]));
-    return Object.freeze({uri: result.uri, svg, targets, warnings, targetById});
+    return Object.freeze({version, uri: result.uri, svg, targets, warnings, targetById});
 }
 
 class ImmutableTargetMap<K, V> implements ReadonlyMap<K, V> {
@@ -576,11 +731,129 @@ function isPanelMessage(value: unknown): value is GraphicalViewPanelMessage {
     if (!isRecord(value)) {
         return false;
     }
-    const keys = Object.keys(value);
+    const keys = Object.keys(value).sort();
     if ((value.type === 'ready' || value.type === 'refresh') && keys.length === 1) {
         return true;
     }
-    return value.type === 'navigate' && keys.length === 2 && typeof value.targetId === 'string';
+    if (value.type === 'rendered') {
+        return keys.length === 2 && keys[0] === 'type' && keys[1] === 'version' && isDisplayedVersion(value.version);
+    }
+    if (value.type === 'renderError') {
+        return keys.length === 3
+            && keys[0] === 'reason'
+            && keys[1] === 'type'
+            && keys[2] === 'version'
+            && value.reason === 'sanitizationFailed'
+            && isDisplayedVersion(value.version);
+    }
+    return value.type === 'navigate'
+        && keys.length === 3
+        && keys[0] === 'targetId'
+        && keys[1] === 'type'
+        && keys[2] === 'version'
+        && isDisplayedVersion(value.version)
+        && typeof value.targetId === 'string'
+        && GRAPHICAL_VIEW_MARKER_PATTERN.test(value.targetId);
+}
+
+function isDisplayedVersion(value: unknown): value is number {
+    return Number.isSafeInteger(value) && (value as number) > 0;
+}
+
+type ValidatedResolveTarget =
+    | Readonly<{kind: 'location'; uri: vscode.Uri; start: vscode.Position; end: vscode.Position}>
+    | Readonly<{kind: 'warning'; warning: GraphicalViewResolveWarning}>
+    | Readonly<{kind: 'invalid'}>;
+
+type GraphicalViewResolveWarning = 'notFound' | 'ambiguous' | 'unsupportedUri' | 'temporarilyUnresolvable';
+
+const RESOLVE_WARNINGS: ReadonlySet<string> = new Set([
+    'notFound',
+    'ambiguous',
+    'unsupportedUri',
+    'temporarilyUnresolvable',
+]);
+
+function validateResolveTargetResult(value: unknown): ValidatedResolveTarget {
+    if (!isRecord(value) || !hasOnlyKeys(value, ['location', 'warning'])) {
+        return {kind: 'invalid'};
+    }
+
+    const warning = value.warning;
+    if (warning !== undefined && warning !== null && (typeof warning !== 'string' || !RESOLVE_WARNINGS.has(warning))) {
+        return {kind: 'invalid'};
+    }
+    const location = value.location;
+    if (location === undefined || location === null) {
+        return typeof warning === 'string'
+            ? {kind: 'warning', warning: warning as GraphicalViewResolveWarning}
+            : {kind: 'invalid'};
+    }
+    if (warning !== undefined && warning !== null) {
+        return {kind: 'invalid'};
+    }
+    if (!isRecord(location) || !hasExactKeys(location, ['range', 'uri']) || typeof location.uri !== 'string') {
+        return {kind: 'invalid'};
+    }
+    const range = location.range;
+    if (!isRecord(range) || !hasExactKeys(range, ['end', 'start'])) {
+        return {kind: 'invalid'};
+    }
+    const start = validatePosition(range.start);
+    const end = validatePosition(range.end);
+    if (!start || !end || start.isAfter(end)) {
+        return {kind: 'invalid'};
+    }
+
+    try {
+        const uri = vscode.Uri.parse(location.uri, true);
+        if (uri.scheme !== 'file'
+            || uri.authority !== ''
+            || !uri.path.startsWith('/')
+            || uri.query !== ''
+            || uri.fragment !== ''
+            || uri.fsPath.includes('\0')) {
+            return {kind: 'warning', warning: 'unsupportedUri'};
+        }
+        return {kind: 'location', uri, start, end};
+    } catch (_error) {
+        return {kind: 'invalid'};
+    }
+}
+
+function validatePosition(value: unknown): vscode.Position | undefined {
+    if (!isRecord(value)
+        || !hasExactKeys(value, ['character', 'line'])
+        || !Number.isSafeInteger(value.line)
+        || !Number.isSafeInteger(value.character)
+        || (value.line as number) < 0
+        || (value.character as number) < 0) {
+        return undefined;
+    }
+    return new vscode.Position(value.line as number, value.character as number);
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowedKeys: readonly string[]): boolean {
+    const allowed = new Set(allowedKeys);
+    return Object.keys(value).every(key => allowed.has(key));
+}
+
+function hasExactKeys(value: Record<string, unknown>, expectedKeys: readonly string[]): boolean {
+    const actualKeys = Object.keys(value).sort();
+    return actualKeys.length === expectedKeys.length && actualKeys.every((key, index) => key === expectedKeys[index]);
+}
+
+function resolveWarningMessage(warning: GraphicalViewResolveWarning): string {
+    switch (warning) {
+        case 'notFound':
+            return 'The graphical target no longer exists in the current model.';
+        case 'ambiguous':
+            return 'The graphical target is ambiguous in the current model.';
+        case 'unsupportedUri':
+            return 'The graphical target is not a local file and cannot be opened.';
+        case 'temporarilyUnresolvable':
+            return 'The graphical target is temporarily unavailable. Fix any model syntax errors and try again.';
+    }
 }
 
 function isMethodNotFound(error: unknown): boolean {

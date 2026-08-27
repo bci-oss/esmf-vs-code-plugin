@@ -48,7 +48,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     aspectValidationController.register(context);
     graphicalViewController = new GraphicalViewController(
         undefined,
-        new VscodeGraphicalViewPanelFactory(),
+        new VscodeGraphicalViewPanelFactory(context.extensionUri),
         vscode.commands,
         vscode.window,
         {

@@ -159,14 +159,15 @@
     "vscode:prepublish": "npm run build",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run build && npm run lint",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-webview-assets.mjs",
     "build-watch": "tsc -p tsconfig.json --watch",
     "prettier": "prettier --config .prettierrc --write './src/**/*{.ts,.js,.json}'",
     "test": "vscode-test --config .vscode-test.mjs",
     "test:prettier": "prettier --config .prettierrc --list-different './src/**/*{.ts,.js,.json}'",
     "test:coverage": "vscode-test --config .vscode-test.mjs --coverage --coverage-reporter text --coverage-reporter lcov",
     "lint": "eslint src --ext .ts",
-    "lint:fix": "eslint src --ext .ts --fix"
+    "lint:fix": "eslint src --ext .ts --fix",
+    "test:webview-assets": "node scripts/verify-webview-assets.mjs"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
@@ -179,6 +180,7 @@
     "typescript-eslint": "^8.56.1"
   },
   "dependencies": {
+    "dompurify": "3.4.13",
     "extract-zip": "^2.0.1",
     "tar": "^7.5.15",
     "vscode-languageclient": "^9.0.1"
