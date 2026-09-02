@@ -15,18 +15,21 @@ import * as vscode from 'vscode';
 import {
     GraphicalViewCommands,
     GraphicalViewController,
-    GraphicalViewDelivery,
     GraphicalViewDocument,
-    GraphicalViewPanelAdapter,
-    GraphicalViewPanelFactory,
     GraphicalViewWindow,
     GraphicalViewWorkspace,
 } from '../graphicalView';
+import type {GraphicalViewClient} from '../graphicalViewClient';
+import {
+    GraphicalViewDelivery,
+    GraphicalViewPanel,
+    GraphicalViewPanelFactory,
+    GraphicalViewStatus,
+} from '../graphicalViewPanel';
 import {
     GraphicalViewRenderParams,
     GraphicalViewRenderResult,
     GraphicalViewElementHeaderTarget,
-    GraphicalViewRequestClient,
     GraphicalViewResolveAttributeTargetParams,
     GraphicalViewResolveAttributeTargetResult,
     GraphicalViewResolveTargetParams,
@@ -50,7 +53,7 @@ export interface RecordedAttributeResolveRequest {
     readonly token: vscode.CancellationToken | undefined;
 }
 
-export class FakeGraphicalViewClient implements GraphicalViewRequestClient {
+export class FakeGraphicalViewClient implements GraphicalViewClient {
     readonly requests: RecordedRenderRequest[] = [];
     readonly resolveRequests: RecordedResolveRequest[] = [];
     readonly attributeResolveRequests: RecordedAttributeResolveRequest[] = [];
@@ -60,32 +63,32 @@ export class FakeGraphicalViewClient implements GraphicalViewRequestClient {
 
     constructor(private available = true) {}
 
-    isGraphicalViewAvailable(): boolean {
+    isAvailable(): boolean {
         return this.available;
     }
 
-    onDidChangeGraphicalViewAvailability(listener: (available: boolean) => void): vscode.Disposable {
+    onDidChangeAvailability(listener: (available: boolean) => void): vscode.Disposable {
         this.listeners.add(listener);
         return new vscode.Disposable(() => this.listeners.delete(listener));
     }
 
-    renderGraphicalView(params: GraphicalViewRenderParams, token: vscode.CancellationToken): Promise<GraphicalViewRenderResult> {
+    render(params: GraphicalViewRenderParams, token: vscode.CancellationToken): Promise<GraphicalViewRenderResult> {
         const deferred = new Deferred<GraphicalViewRenderResult>();
         this.requests.push({params, token, deferred});
         return deferred.promise;
     }
 
-    resolveGraphicalViewTarget(
+    resolveElement(
         params: GraphicalViewResolveTargetParams,
-        token?: vscode.CancellationToken,
+        token: vscode.CancellationToken,
     ): Promise<GraphicalViewResolveTargetResult> {
         this.resolveRequests.push({params, token});
         return this.resolveFailure === undefined ? Promise.resolve(this.resolveResult) : Promise.reject(this.resolveFailure);
     }
 
-    resolveGraphicalViewAttributeTarget(
+    resolveAttribute(
         params: GraphicalViewResolveAttributeTargetParams,
-        token?: vscode.CancellationToken,
+        token: vscode.CancellationToken,
     ): Promise<GraphicalViewResolveAttributeTargetResult> {
         this.attributeResolveRequests.push({params, token});
         return this.resolveFailure === undefined ? Promise.resolve(this.resolveResult) : Promise.reject(this.resolveFailure);
@@ -99,7 +102,7 @@ export class FakeGraphicalViewClient implements GraphicalViewRequestClient {
     }
 }
 
-export class FakeGraphicalViewPanel implements GraphicalViewPanelAdapter {
+export class FakeGraphicalViewPanel implements GraphicalViewPanel {
     readonly deliveries: GraphicalViewDelivery[] = [];
     revealCount = 0;
     disposeCount = 0;
@@ -214,6 +217,24 @@ export function successfulResult(
         targets: [{id, kind: 'elementHeader', elementUrn: 'urn:samm:example.graphical:1.0.0#Aspect'}],
         warnings: [],
     };
+}
+
+export async function openGraphicalView(
+    harness: ReturnType<typeof createGraphicalViewHarness>,
+    document: GraphicalViewDocument,
+): Promise<void> {
+    harness.window.activeTextEditor = {document};
+    await harness.commands.execute('turtle.openGraphicalView');
+}
+
+export function lastStatus(panel: FakeGraphicalViewPanel): GraphicalViewStatus | undefined {
+    return panel.deliveries.filter(delivery => delivery.type === 'status').at(-1)?.status;
+}
+
+export function renderDeliveries(panel: FakeGraphicalViewPanel): Array<Extract<GraphicalViewDelivery, {type: 'render'}>> {
+    return panel.deliveries.filter((delivery): delivery is Extract<GraphicalViewDelivery, {type: 'render'}> =>
+        delivery.type === 'render',
+    );
 }
 
 export async function flushPromises(): Promise<void> {

@@ -19,6 +19,7 @@ import { TurtleExtensionSettings } from './settings';
 import { TurtleLanguageClient } from './languageClient';
 import type { ExtensionLogger } from './outputChannel';
 import { GraphicalViewController } from './graphicalView';
+import {LspGraphicalViewClient} from './graphicalViewClient';
 import { VscodeGraphicalViewPanelFactory } from './graphicalViewPanel';
 
 const SELECT_EXECUTABLE_COMMAND = 'turtle.selectSammCliExecutable';
@@ -171,7 +172,7 @@ async function restartLanguageServices(reason: string): Promise<void> {
     await nextClient.connect();
     languageClient = nextClient;
     aspectValidationController.setClient(nextClient);
-    graphicalViewController.setClient(nextClient);
+    graphicalViewController.setClient(new LspGraphicalViewClient(nextClient));
 }
 
 type SammCliQuickPickItem = vscode.QuickPickItem & {

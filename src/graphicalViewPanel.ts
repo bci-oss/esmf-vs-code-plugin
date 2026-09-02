@@ -13,16 +13,47 @@
 
 import {randomBytes} from 'node:crypto';
 import * as vscode from 'vscode';
-import {GraphicalViewDelivery, GraphicalViewPanelAdapter, GraphicalViewPanelFactory} from './graphicalView';
+import {GRAPHICAL_VIEW_MARKER_PATTERN} from './graphicalViewProtocol';
 
 const VIEW_TYPE = 'turtle.graphicalView';
 export const WEBVIEW_ASSET_DIRECTORY = Object.freeze(['out', 'webview'] as const);
 export const WEBVIEW_SCRIPT_ORDER = Object.freeze(['purify.min.js', 'sanitizer-contract.js', 'webview.js'] as const);
 
+export type GraphicalViewStatus =
+    | Readonly<{kind: 'loading'; message: string}>
+    | Readonly<{kind: 'ready'; message: string}>
+    | Readonly<{kind: 'stale'; reason: string; message: string}>
+    | Readonly<{kind: 'unsupported'; message: string}>
+    | Readonly<{kind: 'disconnected'; message: string}>;
+
+export type GraphicalViewDelivery =
+    | Readonly<{type: 'status'; status: GraphicalViewStatus}>
+    | Readonly<{type: 'render'; version: number; svg: string}>;
+
+export type GraphicalViewPanelMessage =
+    | Readonly<{type: 'ready'}>
+    | Readonly<{type: 'refresh'}>
+    | Readonly<{type: 'rendered'; version: number}>
+    | Readonly<{type: 'renderError'; version: number; reason: 'sanitizationFailed'}>
+    | Readonly<{type: 'navigate'; version: number; targetId: string}>;
+
+export interface GraphicalViewPanel extends vscode.Disposable {
+    readonly visible: boolean;
+    reveal(): void;
+    deliver(delivery: GraphicalViewDelivery): void;
+    onDidDispose(listener: () => void): vscode.Disposable;
+    onDidChangeVisibility(listener: (visible: boolean) => void): vscode.Disposable;
+    onDidReceiveMessage(listener: (message: unknown) => void): vscode.Disposable;
+}
+
+export interface GraphicalViewPanelFactory {
+    create(sourceUri: string): GraphicalViewPanel;
+}
+
 export class VscodeGraphicalViewPanelFactory implements GraphicalViewPanelFactory {
     constructor(private readonly extensionUri: vscode.Uri) {}
 
-    create(sourceUri: string): GraphicalViewPanelAdapter {
+    create(sourceUri: string): GraphicalViewPanel {
         const uri = vscode.Uri.parse(sourceUri, true);
         const name = uri.path.split('/').filter(Boolean).at(-1) ?? 'Aspect Model';
         const panel = vscode.window.createWebviewPanel(
@@ -35,12 +66,12 @@ export class VscodeGraphicalViewPanelFactory implements GraphicalViewPanelFactor
     }
 }
 
-class VscodeGraphicalViewPanel implements GraphicalViewPanelAdapter {
+class VscodeGraphicalViewPanel implements GraphicalViewPanel {
     constructor(
         private readonly panel: vscode.WebviewPanel,
         extensionUri: vscode.Uri,
     ) {
-        panel.webview.html = createShellHtml(panel.webview, extensionUri);
+        panel.webview.html = createGraphicalViewShell(panel.webview, extensionUri);
     }
 
     get visible(): boolean {
@@ -85,12 +116,11 @@ export function createGraphicalViewPanelOptions(extensionUri: vscode.Uri): vscod
     };
 }
 
-export function createShellHtml(
+export function createGraphicalViewShell(
     webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspSource'>,
     extensionUri: vscode.Uri,
-    nonce = randomBytes(18).toString('base64'),
-    testMode = false,
 ): string {
+    const nonce = randomBytes(18).toString('base64');
     const assetDirectory = webviewAssetDirectory(extensionUri);
     const stylesheetUri = webview.asWebviewUri(vscode.Uri.joinPath(assetDirectory, 'webview.css'));
     const scriptUris = WEBVIEW_SCRIPT_ORDER.map(asset => webview.asWebviewUri(vscode.Uri.joinPath(assetDirectory, asset)));
@@ -107,7 +137,7 @@ export function createShellHtml(
     ].join('; ');
 
     return `<!DOCTYPE html>
-<html lang="en"${testMode ? ' data-test-mode="true"' : ''}>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy" content="${csp}">
@@ -133,4 +163,45 @@ export function createShellHtml(
     <script nonce="${nonce}" src="${scriptUris[2]}"></script>
 </body>
 </html>`;
+}
+
+export function parseGraphicalViewPanelMessage(value: unknown): GraphicalViewPanelMessage | undefined {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+    const keys = Object.keys(value).sort();
+    if ((value.type === 'ready' || value.type === 'refresh') && keys.length === 1) {
+        return value as {type: 'ready'} | {type: 'refresh'};
+    }
+    if (value.type === 'rendered'
+        && hasExactKeys(keys, ['type', 'version'])
+        && isDisplayedVersion(value.version)) {
+        return value as {type: 'rendered'; version: number};
+    }
+    if (value.type === 'renderError'
+        && hasExactKeys(keys, ['reason', 'type', 'version'])
+        && value.reason === 'sanitizationFailed'
+        && isDisplayedVersion(value.version)) {
+        return value as {type: 'renderError'; version: number; reason: 'sanitizationFailed'};
+    }
+    if (value.type === 'navigate'
+        && hasExactKeys(keys, ['targetId', 'type', 'version'])
+        && isDisplayedVersion(value.version)
+        && typeof value.targetId === 'string'
+        && GRAPHICAL_VIEW_MARKER_PATTERN.test(value.targetId)) {
+        return value as {type: 'navigate'; version: number; targetId: string};
+    }
+    return undefined;
+}
+
+function isDisplayedVersion(value: unknown): value is number {
+    return Number.isSafeInteger(value) && (value as number) > 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+function hasExactKeys(actualKeys: readonly string[], expectedKeys: readonly string[]): boolean {
+    return actualKeys.length === expectedKeys.length && actualKeys.every((key, index) => key === expectedKeys[index]);
 }

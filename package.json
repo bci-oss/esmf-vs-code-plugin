@@ -44,7 +44,11 @@
         "command": "turtle.openGraphicalView",
         "title": "Open Graphical View",
         "category": "Turtle",
-        "enablement": "editorLangId == turtle"
+        "enablement": "editorLangId == turtle",
+        "icon": {
+          "light": "media/aspect-model-editor-targetsize-192.png",
+          "dark": "media/aspect-model-editor-targetsize-192.png"
+        }
       }
     ],
     "languages": [
@@ -114,6 +118,13 @@
       }
     },
     "menus": {
+      "editor/title": [
+        {
+          "command": "turtle.openGraphicalView",
+          "when": "resourceLangId == turtle",
+          "group": "navigation@10"
+        }
+      ],
       "editor/context": [
         {
           "command": "turtle.validateDocumentNow",

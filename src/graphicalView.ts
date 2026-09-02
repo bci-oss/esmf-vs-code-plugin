@@ -13,57 +13,18 @@
 
 import * as vscode from 'vscode';
 import type {ExtensionLogger} from './outputChannel';
+import type {GraphicalViewClient} from './graphicalViewClient';
+import {resolveGraphicalViewNavigation} from './graphicalViewNavigation';
 import {
-    GRAPHICAL_VIEW_MARKER_PATTERN,
-    GraphicalViewRenderResult,
-    GraphicalViewRenderWarning,
-    GraphicalViewRequestClient,
-    GraphicalViewTarget,
-    isGraphicalViewRenderResult,
-} from './graphicalViewProtocol';
+    GraphicalViewPanel,
+    GraphicalViewPanelFactory,
+    GraphicalViewStatus,
+    parseGraphicalViewPanelMessage,
+} from './graphicalViewPanel';
+import type {GraphicalViewRenderResult, GraphicalViewRenderWarning, GraphicalViewTarget} from './graphicalViewProtocol';
+import {AcceptedGraphicalViewResult, acceptGraphicalViewResult, isGraphicalViewRenderResult} from './graphicalViewResult';
 
 export const OPEN_GRAPHICAL_VIEW_COMMAND = 'turtle.openGraphicalView';
-
-export type GraphicalViewStatus =
-    | Readonly<{kind: 'loading'; message: string}>
-    | Readonly<{kind: 'ready'; message: string}>
-    | Readonly<{kind: 'stale'; reason: string; message: string}>
-    | Readonly<{kind: 'unsupported'; message: string}>
-    | Readonly<{kind: 'disconnected'; message: string}>;
-
-export interface GraphicalViewAcceptedResult {
-    readonly version: number;
-    readonly uri: string;
-    readonly svg: string;
-    readonly targets: readonly Readonly<GraphicalViewTarget>[];
-    readonly warnings: readonly GraphicalViewRenderWarning[];
-    readonly targetById: ReadonlyMap<string, Readonly<GraphicalViewTarget>>;
-    readonly attributeRowsAvailable: boolean;
-}
-
-export type GraphicalViewDelivery =
-    | Readonly<{type: 'status'; status: GraphicalViewStatus}>
-    | Readonly<{type: 'render'; version: number; svg: string}>;
-
-export type GraphicalViewPanelMessage =
-    | Readonly<{type: 'ready'}>
-    | Readonly<{type: 'refresh'}>
-    | Readonly<{type: 'rendered'; version: number}>
-    | Readonly<{type: 'renderError'; version: number; reason: 'sanitizationFailed'}>
-    | Readonly<{type: 'navigate'; version: number; targetId: string}>;
-
-export interface GraphicalViewPanelAdapter extends vscode.Disposable {
-    readonly visible: boolean;
-    reveal(): void;
-    deliver(delivery: GraphicalViewDelivery): void;
-    onDidDispose(listener: () => void): vscode.Disposable;
-    onDidChangeVisibility(listener: (visible: boolean) => void): vscode.Disposable;
-    onDidReceiveMessage(listener: (message: unknown) => void): vscode.Disposable;
-}
-
-export interface GraphicalViewPanelFactory {
-    create(sourceUri: string): GraphicalViewPanelAdapter;
-}
 
 export interface GraphicalViewDocument {
     readonly languageId: string;
@@ -86,22 +47,9 @@ export interface GraphicalViewCommands {
     registerCommand(command: string, callback: () => unknown): vscode.Disposable;
 }
 
-export interface GraphicalViewControllerContext {
-    subscriptions: vscode.Disposable[];
-}
-
-export interface GraphicalViewPanelSnapshot {
-    readonly sourceUri: string;
-    readonly sequence: number;
-    readonly visible: boolean;
-    readonly disposed: boolean;
-    readonly status: GraphicalViewStatus;
-    readonly lastSuccess: GraphicalViewAcceptedResult | undefined;
-}
-
 interface PanelState {
     readonly sourceUri: string;
-    readonly panel: GraphicalViewPanelAdapter;
+    readonly panel: GraphicalViewPanel;
     readonly subscriptions: vscode.Disposable[];
     sequence: number;
     sourceAvailable: boolean;
@@ -111,12 +59,12 @@ interface PanelState {
     navigationCancellation: vscode.CancellationTokenSource | undefined;
     nextDisplayVersion: number;
     status: GraphicalViewStatus;
-    lastSuccess: GraphicalViewAcceptedResult | undefined;
+    lastSuccess: AcceptedGraphicalViewResult | undefined;
     pendingDelivery: PendingDelivery | undefined;
 }
 
 interface PendingDelivery {
-    readonly accepted: GraphicalViewAcceptedResult;
+    readonly accepted: AcceptedGraphicalViewResult;
     readonly requestSequence: number;
 }
 
@@ -133,25 +81,23 @@ export class GraphicalViewController implements vscode.Disposable {
     private disposed = false;
 
     constructor(
-        private client: GraphicalViewRequestClient | undefined,
+        private client: GraphicalViewClient | undefined,
         private readonly panelFactory: GraphicalViewPanelFactory,
         private readonly commands: GraphicalViewCommands,
         private readonly window: GraphicalViewWindow,
         private readonly workspace: GraphicalViewWorkspace,
         private readonly outputChannel: ExtensionLogger,
-        private readonly createCancellationSource: () => vscode.CancellationTokenSource = () => new vscode.CancellationTokenSource(),
     ) {
         this.subscribeToClient();
     }
 
-    register(context: GraphicalViewControllerContext): void {
+    register(context: Pick<vscode.ExtensionContext, 'subscriptions'>): void {
         if (this.registered || this.disposed) {
             return;
         }
         this.registered = true;
-
         this.subscriptions.push(
-            this.commands.registerCommand(OPEN_GRAPHICAL_VIEW_COMMAND, () => this.openGraphicalView(this.window.activeTextEditor?.document)),
+            this.commands.registerCommand(OPEN_GRAPHICAL_VIEW_COMMAND, () => this.openActiveDocument()),
             this.workspace.onDidSaveTextDocument(document => this.handleSave(document)),
             this.workspace.onDidChangeDocumentAvailability((sourceUri, available) =>
                 this.handleDocumentAvailability(sourceUri, available),
@@ -160,17 +106,47 @@ export class GraphicalViewController implements vscode.Disposable {
         context.subscriptions.push(this);
     }
 
-    async openGraphicalView(document: GraphicalViewDocument | undefined): Promise<GraphicalViewPanelSnapshot | undefined> {
+    setClient(client: GraphicalViewClient | undefined): void {
+        if (this.disposed) {
+            return;
+        }
+        this.clientSubscription?.dispose();
+        this.clientSubscription = undefined;
+        this.client = client;
+        for (const state of this.panels.values()) {
+            this.invalidate(state);
+            this.setStatus(state, client?.isAvailable() ? availableAgainStatus(state) : DISCONNECTED_STATUS);
+        }
+        this.subscribeToClient();
+    }
+
+    dispose(): void {
+        if (this.disposed) {
+            return;
+        }
+        this.disposed = true;
+        this.clientSubscription?.dispose();
+        this.clientSubscription = undefined;
+        for (const subscription of this.subscriptions.splice(0)) {
+            subscription.dispose();
+        }
+        for (const state of [...this.panels.values()]) {
+            this.disposePanelState(state, true);
+        }
+    }
+
+    private async openActiveDocument(): Promise<void> {
+        const document = this.window.activeTextEditor?.document;
         if (!document || document.languageId !== 'turtle') {
             await this.window.showWarningMessage('Open a Turtle file before opening the graphical view.');
-            return undefined;
+            return;
         }
 
         const sourceUri = document.uri.toString();
         const existing = this.panels.get(sourceUri);
         if (existing && !existing.disposed) {
             existing.panel.reveal();
-            return this.snapshot(existing);
+            return;
         }
 
         const panel = this.panelFactory.create(sourceUri);
@@ -196,53 +172,13 @@ export class GraphicalViewController implements vscode.Disposable {
             panel.onDidReceiveMessage(message => this.handlePanelMessage(state, message)),
         );
         void this.requestRender(state, 'initial');
-        return this.snapshot(state);
-    }
-
-    setClient(client: GraphicalViewRequestClient | undefined): void {
-        if (this.disposed) {
-            return;
-        }
-
-        this.clientSubscription?.dispose();
-        this.clientSubscription = undefined;
-        this.client = client;
-        for (const state of this.panels.values()) {
-            this.invalidate(state);
-            this.setStatus(state, client?.isGraphicalViewAvailable() ? availableAgainStatus(state) : DISCONNECTED_STATUS);
-        }
-        this.subscribeToClient();
-    }
-
-    getPanelCount(): number {
-        return this.panels.size;
-    }
-
-    getPanelState(sourceUri: string): GraphicalViewPanelSnapshot | undefined {
-        const state = this.panels.get(sourceUri);
-        return state ? this.snapshot(state) : undefined;
-    }
-
-    dispose(): void {
-        if (this.disposed) {
-            return;
-        }
-        this.disposed = true;
-        this.clientSubscription?.dispose();
-        this.clientSubscription = undefined;
-        for (const subscription of this.subscriptions.splice(0)) {
-            subscription.dispose();
-        }
-        for (const state of [...this.panels.values()]) {
-            this.disposePanelState(state, true);
-        }
     }
 
     private subscribeToClient(): void {
         if (!this.client || this.disposed) {
             return;
         }
-        this.clientSubscription = this.client.onDidChangeGraphicalViewAvailability(available => this.handleClientAvailability(available));
+        this.clientSubscription = this.client.onDidChangeAvailability(available => this.handleClientAvailability(available));
     }
 
     private handleClientAvailability(available: boolean): void {
@@ -261,13 +197,11 @@ export class GraphicalViewController implements vscode.Disposable {
         if (!state || state.disposed) {
             return;
         }
-
         if (!state.visible) {
             this.invalidate(state);
             this.setStatus(state, retainedAfterHiddenSaveStatus(state));
             return;
         }
-
         void this.requestRender(state, 'save');
     }
 
@@ -276,12 +210,10 @@ export class GraphicalViewController implements vscode.Disposable {
         if (!state || state.disposed || state.sourceAvailable === available) {
             return;
         }
-
         state.sourceAvailable = available;
         if (available) {
             return;
         }
-
         this.invalidate(state);
         this.setStatus(state, retainedAfterSourceLossStatus(state));
     }
@@ -296,11 +228,14 @@ export class GraphicalViewController implements vscode.Disposable {
         }
     }
 
-    private handlePanelMessage(state: PanelState, message: unknown): void {
-        if (!this.isCurrent(state) || !isPanelMessage(message)) {
+    private handlePanelMessage(state: PanelState, value: unknown): void {
+        if (!this.isCurrent(state)) {
             return;
         }
-
+        const message = parseGraphicalViewPanelMessage(value);
+        if (!message) {
+            return;
+        }
         switch (message.type) {
             case 'ready':
                 this.deliverCurrentState(state);
@@ -317,8 +252,7 @@ export class GraphicalViewController implements vscode.Disposable {
                 this.handleRenderError(state, message.version);
                 return;
             case 'navigate':
-                void this.navigateToTarget(state, message);
-                return;
+                void this.navigateToTarget(state, message.version, message.targetId);
         }
     }
 
@@ -326,45 +260,39 @@ export class GraphicalViewController implements vscode.Disposable {
         if (!this.isCurrent(state)) {
             return;
         }
-
-        this.cancelCurrent(state);
+        this.cancelRender(state);
         const sequence = ++state.sequence;
         const sourceUri = state.sourceUri;
-
         state.sourceAvailable = this.workspace.isDocumentAvailable(sourceUri);
         if (!state.sourceAvailable) {
-            this.setStatus(
+            this.setStale(
                 state,
-                Object.freeze({
-                    kind: 'stale',
-                    reason: 'sourceUnavailable',
-                    message: 'The source document is not available to the language server. Reopen it and use Refresh.',
-                }),
+                'sourceUnavailable',
+                'The source document is not available to the language server. Reopen it and use Refresh.',
             );
             return;
         }
 
         const client = this.client;
-        if (!client?.isGraphicalViewAvailable()) {
+        if (!client?.isAvailable()) {
             this.setStatus(state, DISCONNECTED_STATUS);
             return;
         }
 
-        const cancellation = this.createCancellationSource();
+        const cancellation = new vscode.CancellationTokenSource();
         state.cancellation = cancellation;
         this.setStatus(state, Object.freeze({kind: 'loading', message: `Rendering graphical view (${trigger})...`}));
-
         try {
             let attributeRowsAvailable = true;
             let result: GraphicalViewRenderResult;
             try {
-                result = await client.renderGraphicalView({uri: sourceUri, includeAttributeRows: true}, cancellation.token);
+                result = await client.render({uri: sourceUri, includeAttributeRows: true}, cancellation.token);
             } catch (error) {
                 if (!isInvalidParams(error) || !this.isCurrentRequest(state, sourceUri, sequence, cancellation)) {
                     throw error;
                 }
                 attributeRowsAvailable = false;
-                result = await client.renderGraphicalView({uri: sourceUri}, cancellation.token);
+                result = await client.render({uri: sourceUri}, cancellation.token);
             }
             if (!this.isCurrentRequest(state, sourceUri, sequence, cancellation)) {
                 return;
@@ -392,46 +320,40 @@ export class GraphicalViewController implements vscode.Disposable {
             this.setStale(state, 'invalidResponse', 'The language server returned an invalid graphical-view response.');
             return;
         }
-
         if (result.uri !== state.sourceUri) {
             this.setStale(state, 'uriMismatch', 'The language server returned a graphical view for a different source document.');
             return;
         }
-
         if (!attributeRowsAvailable && result.targets.some(target => target.kind !== 'elementHeader')) {
             this.setStale(state, 'invalidResponse', 'The legacy language server returned an invalid graphical-view response.');
             return;
         }
-
         if (result.svg === undefined || result.svg === null) {
             this.handleWarningResult(state, result.warnings);
             return;
         }
 
-        const accepted = createAcceptedResult(result, result.svg, ++state.nextDisplayVersion, attributeRowsAvailable);
+        const accepted = acceptGraphicalViewResult(result, ++state.nextDisplayVersion, attributeRowsAvailable);
         state.pendingDelivery = Object.freeze({accepted, requestSequence});
         state.panel.deliver(Object.freeze({type: 'render', version: accepted.version, svg: accepted.svg}));
     }
 
     private handleRendered(state: PanelState, version: number): void {
         const pending = state.pendingDelivery;
-        if (pending?.accepted.version === version) {
-            this.cancelNavigation(state);
-            state.lastSuccess = pending.accepted;
-            state.pendingDelivery = undefined;
-            if (state.sequence === pending.requestSequence) {
-                this.setStatus(state, Object.freeze({
-                    kind: 'ready',
-                    message: pending.accepted.attributeRowsAvailable
-                        ? 'Graphical view is up to date.'
-                        : 'The server supports header navigation only; attribute-row navigation is unavailable.',
-                }));
-            }
+        if (pending?.accepted.version !== version) {
             return;
         }
-
-        // An acknowledgement for a rehydrated last-successful snapshot must not
-        // clear a newer stale/error status.
+        this.cancelNavigation(state);
+        state.lastSuccess = pending.accepted;
+        state.pendingDelivery = undefined;
+        if (state.sequence === pending.requestSequence) {
+            this.setStatus(state, Object.freeze({
+                kind: 'ready',
+                message: pending.accepted.attributeRowsAvailable
+                    ? 'Graphical view is up to date.'
+                    : 'The server supports header navigation only; attribute-row navigation is unavailable.',
+            }));
+        }
     }
 
     private handleRenderError(state: PanelState, version: number): void {
@@ -448,85 +370,58 @@ export class GraphicalViewController implements vscode.Disposable {
         );
     }
 
-    private async navigateToTarget(
-        state: PanelState,
-        message: Readonly<{type: 'navigate'; version: number; targetId: string}>,
-    ): Promise<void> {
+    private async navigateToTarget(state: PanelState, version: number, targetId: string): Promise<void> {
         const accepted = state.lastSuccess;
-        const target = accepted?.version === message.version ? accepted.targetById.get(message.targetId) : undefined;
-        if (!accepted || !target || !GRAPHICAL_VIEW_MARKER_PATTERN.test(message.targetId)) {
+        const target = accepted?.version === version ? accepted.targetById.get(targetId) : undefined;
+        if (!accepted || !target) {
             return;
         }
 
         const client = this.client;
-        if (!client?.isGraphicalViewAvailable()) {
-            await this.warnNavigation('The graphical target is temporarily unavailable because the language server is disconnected.');
+        if (!client?.isAvailable()) {
+            await this.window.showWarningMessage(
+                'The graphical target is temporarily unavailable because the language server is disconnected.',
+            );
             return;
         }
 
         this.cancelNavigation(state);
-        const cancellation = this.createCancellationSource();
+        const cancellation = new vscode.CancellationTokenSource();
         state.navigationCancellation = cancellation;
         try {
-            const response = target.kind === 'elementHeader'
-                ? await client.resolveGraphicalViewTarget(
-                    {sourceUri: state.sourceUri, elementUrn: target.elementUrn},
-                    cancellation.token,
-                )
-                : await client.resolveGraphicalViewAttributeTarget(
-                    {
-                        sourceUri: state.sourceUri,
-                        ownerUrn: target.ownerUrn,
-                        predicateUrn: target.predicateUrn,
-                        selection: target.selection,
-                        ...(target.language === undefined ? {} : {language: target.language}),
-                    },
-                    cancellation.token,
-                );
+            const resolution = await resolveGraphicalViewNavigation(client, state.sourceUri, target, cancellation.token);
             if (!this.isCurrentNavigation(state, accepted, target, cancellation)) {
                 return;
             }
             state.navigationCancellation = undefined;
             cancellation.dispose();
-
-            const resolved = validateResolveTargetResult(response);
-            if (resolved.kind === 'warning') {
-                await this.warnNavigation(resolveWarningMessage(resolved.warning));
-                return;
-            }
-            if (resolved.kind === 'invalid') {
-                await this.warnNavigation('The language server returned an invalid graphical target location.');
+            if (resolution.kind === 'warning') {
+                await this.window.showWarningMessage(resolution.message);
                 return;
             }
 
             try {
-                const editor = await this.window.showTextDocument(resolved.uri, {preview: false});
+                const editor = await this.window.showTextDocument(resolution.uri, {preview: false});
                 if (!this.isCurrentNavigationResult(state, accepted, target)) {
                     return;
                 }
-                const range = new vscode.Range(
-                    resolved.start.line,
-                    resolved.start.character,
-                    resolved.end.line,
-                    resolved.end.character,
-                );
-                editor.selection = new vscode.Selection(range.start, range.end);
-                editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+                editor.selection = new vscode.Selection(resolution.range.start, resolution.range.end);
+                editor.revealRange(resolution.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
             } catch (_error) {
-                await this.warnNavigation('The graphical target could not be opened in an editor.');
+                await this.window.showWarningMessage('The graphical target could not be opened in an editor.');
             }
         } catch (_error) {
             if (this.isCurrentNavigation(state, accepted, target, cancellation)) {
                 state.navigationCancellation = undefined;
                 cancellation.dispose();
-                await this.warnNavigation('The graphical target is temporarily unavailable.');
+                await this.window.showWarningMessage('The graphical target is temporarily unavailable.');
             }
         }
     }
 
     private isCurrentNavigation(
         state: PanelState,
-        accepted: GraphicalViewAcceptedResult,
+        accepted: AcceptedGraphicalViewResult,
         target: Readonly<GraphicalViewTarget>,
         cancellation: vscode.CancellationTokenSource,
     ): boolean {
@@ -535,16 +430,12 @@ export class GraphicalViewController implements vscode.Disposable {
 
     private isCurrentNavigationResult(
         state: PanelState,
-        accepted: GraphicalViewAcceptedResult,
+        accepted: AcceptedGraphicalViewResult,
         target: Readonly<GraphicalViewTarget>,
     ): boolean {
         return this.isCurrent(state)
             && state.lastSuccess === accepted
             && accepted.targetById.get(target.id) === target;
-    }
-
-    private async warnNavigation(message: string): Promise<void> {
-        await this.window.showWarningMessage(message);
     }
 
     private handleWarningResult(state: PanelState, warnings: readonly GraphicalViewRenderWarning[]): void {
@@ -570,18 +461,13 @@ export class GraphicalViewController implements vscode.Disposable {
 
     private handleRenderFailure(state: PanelState, error: unknown): void {
         if (isMethodNotFound(error)) {
-            this.setStatus(
-                state,
-                Object.freeze({
-                    kind: 'unsupported',
-                    message: 'Graphical view is not supported by the current server build. The last successful diagram is retained.',
-                }),
-            );
+            this.setStatus(state, Object.freeze({
+                kind: 'unsupported',
+                message: 'Graphical view is not supported by the current server build. The last successful diagram is retained.',
+            }));
             return;
         }
-
-        const detail = error instanceof Error ? error.message : String(error);
-        const reason = classifyFailure(detail);
+        const reason = classifyFailure(error instanceof Error ? error.message : String(error));
         this.outputChannel.warn(`Graphical view render request failed (${reason}).`);
         this.setStale(state, reason, 'Graphical rendering failed. The last successful diagram is retained.');
     }
@@ -614,13 +500,13 @@ export class GraphicalViewController implements vscode.Disposable {
         if (!this.isCurrent(state)) {
             return;
         }
-        this.cancelCurrent(state);
+        this.cancelRender(state);
         this.cancelNavigation(state);
         state.pendingDelivery = undefined;
         state.sequence += 1;
     }
 
-    private cancelCurrent(state: PanelState): void {
+    private cancelRender(state: PanelState): void {
         const cancellation = state.cancellation;
         state.cancellation = undefined;
         if (cancellation) {
@@ -644,7 +530,10 @@ export class GraphicalViewController implements vscode.Disposable {
         sequence: number,
         cancellation: vscode.CancellationTokenSource,
     ): boolean {
-        return this.isCurrent(state) && state.sourceUri === sourceUri && state.sequence === sequence && state.cancellation === cancellation;
+        return this.isCurrent(state)
+            && state.sourceUri === sourceUri
+            && state.sequence === sequence
+            && state.cancellation === cancellation;
     }
 
     private isCurrent(state: PanelState): boolean {
@@ -655,7 +544,7 @@ export class GraphicalViewController implements vscode.Disposable {
         if (state.disposed) {
             return;
         }
-        this.cancelCurrent(state);
+        this.cancelRender(state);
         this.cancelNavigation(state);
         state.sequence += 1;
         state.disposed = true;
@@ -666,74 +555,6 @@ export class GraphicalViewController implements vscode.Disposable {
         if (disposePanel) {
             state.panel.dispose();
         }
-    }
-
-    private snapshot(state: PanelState): GraphicalViewPanelSnapshot {
-        return Object.freeze({
-            sourceUri: state.sourceUri,
-            sequence: state.sequence,
-            visible: state.visible,
-            disposed: state.disposed,
-            status: state.status,
-            lastSuccess: state.lastSuccess,
-        });
-    }
-}
-
-function createAcceptedResult(
-    result: GraphicalViewRenderResult,
-    svg: string,
-    version: number,
-    attributeRowsAvailable: boolean,
-): GraphicalViewAcceptedResult {
-    const targets = Object.freeze(result.targets.map(target => Object.freeze({...target})));
-    const warnings = Object.freeze([...result.warnings]);
-    const targetById = new ImmutableTargetMap(targets.map(target => [target.id, target]));
-    return Object.freeze({version, uri: result.uri, svg, targets, warnings, targetById, attributeRowsAvailable});
-}
-
-class ImmutableTargetMap<K, V> implements ReadonlyMap<K, V> {
-    private readonly map: Map<K, V>;
-
-    constructor(entries: readonly (readonly [K, V])[]) {
-        this.map = new Map(entries);
-        Object.freeze(this);
-    }
-
-    get size(): number {
-        return this.map.size;
-    }
-
-    get(key: K): V | undefined {
-        return this.map.get(key);
-    }
-
-    has(key: K): boolean {
-        return this.map.has(key);
-    }
-
-    forEach(callbackfn: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: unknown): void {
-        this.map.forEach((value, key) => callbackfn.call(thisArg, value, key, this));
-    }
-
-    entries(): MapIterator<[K, V]> {
-        return this.map.entries();
-    }
-
-    keys(): MapIterator<K> {
-        return this.map.keys();
-    }
-
-    values(): MapIterator<V> {
-        return this.map.values();
-    }
-
-    [Symbol.iterator](): MapIterator<[K, V]> {
-        return this.entries();
-    }
-
-    get [Symbol.toStringTag](): string {
-        return 'ImmutableTargetMap';
     }
 }
 
@@ -748,161 +569,28 @@ function availableAgainStatus(state: PanelState): GraphicalViewStatus {
 }
 
 function retainedAfterHiddenSaveStatus(state: PanelState): GraphicalViewStatus {
-    if (state.lastSuccess) {
-        return Object.freeze({kind: 'ready', message: 'Showing the retained graphical-view snapshot.'});
-    }
-    return Object.freeze({
-        kind: 'stale',
-        reason: 'noSnapshot',
-        message: 'No graphical-view snapshot is available. Reveal the panel and use Refresh to render one.',
-    });
+    return state.lastSuccess
+        ? Object.freeze({kind: 'ready', message: 'Showing the retained graphical-view snapshot.'})
+        : Object.freeze({
+            kind: 'stale',
+            reason: 'noSnapshot',
+            message: 'No graphical-view snapshot is available. Reveal the panel and use Refresh to render one.',
+        });
 }
 
 function retainedAfterSourceLossStatus(state: PanelState): GraphicalViewStatus {
-    if (state.lastSuccess) {
-        return Object.freeze({kind: 'ready', message: 'Showing the retained graphical-view snapshot.'});
-    }
-    return Object.freeze({
-        kind: 'stale',
-        reason: 'sourceUnavailable',
-        message: 'The source document is no longer open. Reopen it and use Refresh to render the graphical view.',
-    });
-}
-
-function isPanelMessage(value: unknown): value is GraphicalViewPanelMessage {
-    if (!isRecord(value)) {
-        return false;
-    }
-    const keys = Object.keys(value).sort();
-    if ((value.type === 'ready' || value.type === 'refresh') && keys.length === 1) {
-        return true;
-    }
-    if (value.type === 'rendered') {
-        return keys.length === 2 && keys[0] === 'type' && keys[1] === 'version' && isDisplayedVersion(value.version);
-    }
-    if (value.type === 'renderError') {
-        return keys.length === 3
-            && keys[0] === 'reason'
-            && keys[1] === 'type'
-            && keys[2] === 'version'
-            && value.reason === 'sanitizationFailed'
-            && isDisplayedVersion(value.version);
-    }
-    return value.type === 'navigate'
-        && keys.length === 3
-        && keys[0] === 'targetId'
-        && keys[1] === 'type'
-        && keys[2] === 'version'
-        && isDisplayedVersion(value.version)
-        && typeof value.targetId === 'string'
-        && GRAPHICAL_VIEW_MARKER_PATTERN.test(value.targetId);
-}
-
-function isDisplayedVersion(value: unknown): value is number {
-    return Number.isSafeInteger(value) && (value as number) > 0;
-}
-
-type ValidatedResolveTarget =
-    | Readonly<{kind: 'location'; uri: vscode.Uri; start: vscode.Position; end: vscode.Position}>
-    | Readonly<{kind: 'warning'; warning: GraphicalViewResolveWarning}>
-    | Readonly<{kind: 'invalid'}>;
-
-type GraphicalViewResolveWarning = 'notFound' | 'ambiguous' | 'unsupportedUri' | 'temporarilyUnresolvable';
-
-const RESOLVE_WARNINGS: ReadonlySet<string> = new Set([
-    'notFound',
-    'ambiguous',
-    'unsupportedUri',
-    'temporarilyUnresolvable',
-]);
-
-function validateResolveTargetResult(value: unknown): ValidatedResolveTarget {
-    if (!isRecord(value) || !hasOnlyKeys(value, ['location', 'warning'])) {
-        return {kind: 'invalid'};
-    }
-
-    const warning = value.warning;
-    if (warning !== undefined && warning !== null && (typeof warning !== 'string' || !RESOLVE_WARNINGS.has(warning))) {
-        return {kind: 'invalid'};
-    }
-    const location = value.location;
-    if (location === undefined || location === null) {
-        return typeof warning === 'string'
-            ? {kind: 'warning', warning: warning as GraphicalViewResolveWarning}
-            : {kind: 'invalid'};
-    }
-    if (warning !== undefined && warning !== null) {
-        return {kind: 'invalid'};
-    }
-    if (!isRecord(location) || !hasExactKeys(location, ['range', 'uri']) || typeof location.uri !== 'string') {
-        return {kind: 'invalid'};
-    }
-    const range = location.range;
-    if (!isRecord(range) || !hasExactKeys(range, ['end', 'start'])) {
-        return {kind: 'invalid'};
-    }
-    const start = validatePosition(range.start);
-    const end = validatePosition(range.end);
-    if (!start || !end || start.isAfter(end)) {
-        return {kind: 'invalid'};
-    }
-
-    try {
-        const uri = vscode.Uri.parse(location.uri, true);
-        if (uri.scheme !== 'file'
-            || uri.authority !== ''
-            || !uri.path.startsWith('/')
-            || uri.query !== ''
-            || uri.fragment !== ''
-            || uri.fsPath.includes('\0')) {
-            return {kind: 'warning', warning: 'unsupportedUri'};
-        }
-        return {kind: 'location', uri, start, end};
-    } catch (_error) {
-        return {kind: 'invalid'};
-    }
-}
-
-function validatePosition(value: unknown): vscode.Position | undefined {
-    if (!isRecord(value)
-        || !hasExactKeys(value, ['character', 'line'])
-        || !Number.isSafeInteger(value.line)
-        || !Number.isSafeInteger(value.character)
-        || (value.line as number) < 0
-        || (value.character as number) < 0) {
-        return undefined;
-    }
-    return new vscode.Position(value.line as number, value.character as number);
-}
-
-function hasOnlyKeys(value: Record<string, unknown>, allowedKeys: readonly string[]): boolean {
-    const allowed = new Set(allowedKeys);
-    return Object.keys(value).every(key => allowed.has(key));
-}
-
-function hasExactKeys(value: Record<string, unknown>, expectedKeys: readonly string[]): boolean {
-    const actualKeys = Object.keys(value).sort();
-    return actualKeys.length === expectedKeys.length && actualKeys.every((key, index) => key === expectedKeys[index]);
-}
-
-function resolveWarningMessage(warning: GraphicalViewResolveWarning): string {
-    switch (warning) {
-        case 'notFound':
-            return 'The graphical target no longer exists in the current model.';
-        case 'ambiguous':
-            return 'The graphical target is ambiguous in the current model.';
-        case 'unsupportedUri':
-            return 'The graphical target is not a local file and cannot be opened.';
-        case 'temporarilyUnresolvable':
-            return 'The graphical target is temporarily unavailable. Fix any model syntax errors and try again.';
-    }
+    return state.lastSuccess
+        ? Object.freeze({kind: 'ready', message: 'Showing the retained graphical-view snapshot.'})
+        : Object.freeze({
+            kind: 'stale',
+            reason: 'sourceUnavailable',
+            message: 'The source document is no longer open. Reopen it and use Refresh to render the graphical view.',
+        });
 }
 
 function isMethodNotFound(error: unknown): boolean {
-    if (isRecord(error) && error.code === -32601) {
-        return true;
-    }
-    return error instanceof Error && /method\s+not\s+found/i.test(error.message);
+    return (isRecord(error) && error.code === -32601)
+        || (error instanceof Error && /method\s+not\s+found/i.test(error.message));
 }
 
 function isInvalidParams(error: unknown): boolean {

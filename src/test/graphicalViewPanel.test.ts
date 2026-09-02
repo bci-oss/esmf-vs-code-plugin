@@ -16,7 +16,13 @@ import {createHash} from 'node:crypto';
 import {readdirSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import * as vscode from 'vscode';
-import {WEBVIEW_SCRIPT_ORDER, createGraphicalViewPanelOptions, createShellHtml, webviewAssetDirectory} from '../graphicalViewPanel';
+import {
+    WEBVIEW_SCRIPT_ORDER,
+    createGraphicalViewPanelOptions,
+    createGraphicalViewShell,
+    parseGraphicalViewPanelMessage,
+    webviewAssetDirectory,
+} from '../graphicalViewPanel';
 
 suite('GraphicalView secure panel contract', () => {
     test('uses exact script/forms/command options and one out/webview resource root without retention', () => {
@@ -37,19 +43,22 @@ suite('GraphicalView secure panel contract', () => {
             cspSource: 'vscode-webview-resource:',
             asWebviewUri: (uri: vscode.Uri) => uri.with({scheme: 'vscode-webview-resource'}),
         };
-        const first = createShellHtml(webview, extensionUri, 'first-nonce');
-        const second = createShellHtml(webview, extensionUri, 'second-nonce');
+        const first = createGraphicalViewShell(webview, extensionUri);
+        const second = createGraphicalViewShell(webview, extensionUri);
+        const firstNonce = first.match(/script-src 'nonce-([^']+)'/)?.[1];
+        const secondNonce = second.match(/script-src 'nonce-([^']+)'/)?.[1];
+        assert.ok(firstNonce);
+        assert.ok(secondNonce);
+        assert.notEqual(firstNonce, secondNonce);
 
         const expectedCsp =
-            "default-src 'none'; script-src 'nonce-first-nonce'; style-src vscode-webview-resource:; " +
+            `default-src 'none'; script-src 'nonce-${firstNonce}'; style-src vscode-webview-resource:; ` +
             "font-src vscode-webview-resource:; img-src 'none'; connect-src 'none'; object-src 'none'; " +
             "base-uri 'none'; form-action 'none'";
         assert.ok(first.includes(`content="${expectedCsp}"`));
-        assert.equal(first.includes('second-nonce'), false);
-        assert.equal(second.includes('second-nonce'), true);
         assert.equal((first.match(/<script /g) ?? []).length, 3);
-        assert.equal((first.match(/nonce="first-nonce"/g) ?? []).length, 3);
-        assert.equal(first.includes('<script nonce="first-nonce">'), false);
+        assert.equal(first.split(`nonce="${firstNonce}"`).length - 1, 3);
+        assert.equal(first.includes(`<script nonce="${firstNonce}">`), false);
         assert.equal(first.includes('http://'), false);
         assert.equal(first.includes('https://'), false);
 
@@ -60,6 +69,25 @@ suite('GraphicalView secure panel contract', () => {
             scriptPositions,
         );
         assert.ok(first.includes('/out/webview/webview.css'));
+    });
+
+    test('accepts only exact production webview messages', () => {
+        assert.deepEqual(parseGraphicalViewPanelMessage({type: 'ready'}), {type: 'ready'});
+        assert.deepEqual(parseGraphicalViewPanelMessage({type: 'refresh'}), {type: 'refresh'});
+        assert.deepEqual(parseGraphicalViewPanelMessage({type: 'rendered', version: 1}), {type: 'rendered', version: 1});
+        assert.deepEqual(
+            parseGraphicalViewPanelMessage({type: 'navigate', version: 2, targetId: 'gv-attribute-aaaaaaaaaaaaaaaa'}),
+            {type: 'navigate', version: 2, targetId: 'gv-attribute-aaaaaaaaaaaaaaaa'},
+        );
+        for (const message of [
+            {type: 'ready', extra: true},
+            {type: 'navigate', version: 2, targetId: 'bad'},
+            {type: 'navigate', version: 2, targetId: 'gv-header-aaaaaaaaaaaaaaaa', uri: 'file:///tmp/evil.ttl'},
+            {type: 'rendered', version: 0},
+            {type: 'renderError', version: 1, reason: 'other'},
+        ]) {
+            assert.equal(parseGraphicalViewPanelMessage(message), undefined);
+        }
     });
 
     test('build output contains only the deterministic webview inventory and reference hashes', () => {
@@ -92,6 +120,9 @@ suite('GraphicalView secure panel contract', () => {
         assert.ok(controllerSource.includes('scrollLeft'));
         assert.ok(controllerSource.includes('scrollTop'));
         assert.equal(/setState\([^)]*(?:svg|uri|target|command)/i.test(controllerSource), false);
+        assert.ok(controllerSource.includes("event.key !== 'Enter' && event.key !== ' '"));
+        assert.ok(controllerSource.includes("vscode.postMessage({type: 'navigate', version: currentVersion, targetId: group.id})"));
+        assert.equal(/testMode|testSetViewport|testClickMarker|testKeyMarker|testState|testRenderDiagnostic/.test(controllerSource), false);
     });
 });
 

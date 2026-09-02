@@ -14,50 +14,29 @@
 import { Trace } from 'vscode-jsonrpc';
 import * as net from 'node:net';
 import * as vscode from 'vscode';
-import {LanguageClient, LanguageClientOptions, State, StateChangeEvent, StreamInfo} from 'vscode-languageclient/node';
+import {LanguageClient, LanguageClientOptions, State, StreamInfo} from 'vscode-languageclient/node';
 import type { RequestClient } from './aspectValidation';
-import {
-    GRAPHICAL_VIEW_RENDER_REQUEST,
-    GRAPHICAL_VIEW_RESOLVE_ATTRIBUTE_TARGET_REQUEST,
-    GRAPHICAL_VIEW_RESOLVE_TARGET_REQUEST,
-    GraphicalViewRenderParams,
-    GraphicalViewRenderResult,
-    GraphicalViewRequestClient,
-    GraphicalViewResolveAttributeTargetParams,
-    GraphicalViewResolveAttributeTargetResult,
-    GraphicalViewResolveTargetParams,
-    GraphicalViewResolveTargetResult,
-} from './graphicalViewProtocol';
+import type {GraphicalViewRequestTransport} from './graphicalViewClient';
 import type { ExtensionLogger } from './outputChannel';
 
 const CLIENT_START_TIMEOUT_MS = 5000;
 
-export interface LanguageClientAdapter {
-    readonly state: State;
-    setTrace(value: Trace): void;
-    start(): Promise<void>;
-    stop(): Promise<void>;
-    onDidChangeState(listener: (event: StateChangeEvent) => void): vscode.Disposable;
-    sendRequest<R>(method: string, params?: unknown, token?: vscode.CancellationToken): Promise<R>;
-}
-
-export class TurtleLanguageClient implements RequestClient, GraphicalViewRequestClient {
-    private client: LanguageClientAdapter;
-    private readonly graphicalViewAvailability = new vscode.EventEmitter<boolean>();
-    private lastGraphicalViewAvailability = false;
+export class TurtleLanguageClient implements RequestClient, GraphicalViewRequestTransport {
+    private readonly client: LanguageClient;
+    private readonly availability = new vscode.EventEmitter<boolean>();
+    private lastAvailability = false;
 
     constructor(
         private outputChannel: ExtensionLogger,
         private readonly serverPort: number,
         private readonly traceLevel: 'off' | 'messages' | 'verbose' = 'off',
-        clientFactory?: () => LanguageClientAdapter,
     ) {
-        this.client = clientFactory ? clientFactory() : this.initLanguageClient(this.serverPort);
+        this.client = this.initLanguageClient(this.serverPort);
         this.client.onDidChangeState(event => {
             const available = event.newState === State.Running;
-            if (available !== this.lastGraphicalViewAvailability) {
-                this.lastGraphicalViewAvailability = available;
-                this.graphicalViewAvailability.fire(available);
+            if (available !== this.lastAvailability) {
+                this.lastAvailability = available;
+                this.availability.fire(available);
             }
         });
     }
@@ -70,7 +49,7 @@ export class TurtleLanguageClient implements RequestClient, GraphicalViewRequest
         }
     }
 
-    private initLanguageClient(serverPort: number): LanguageClientAdapter {
+    private initLanguageClient(serverPort: number): LanguageClient {
         const serverOptions = async (): Promise<StreamInfo> => new Promise((resolve, reject) => {
             const socket = net.connect({ host: '127.0.0.1', port: serverPort }, () => {
                 resolve({ reader: socket, writer: socket });
@@ -139,34 +118,12 @@ export class TurtleLanguageClient implements RequestClient, GraphicalViewRequest
         return this.client.sendRequest<R>(method, params, token) as Promise<R>;
     }
 
-    isGraphicalViewAvailable(): boolean {
+    isAvailable(): boolean {
         return this.client.state === State.Running;
     }
 
-    onDidChangeGraphicalViewAvailability(listener: (available: boolean) => void): vscode.Disposable {
-        return this.graphicalViewAvailability.event(listener);
-    }
-
-    renderGraphicalView(params: GraphicalViewRenderParams, token: vscode.CancellationToken): Promise<GraphicalViewRenderResult> {
-        return this.sendRequest<GraphicalViewRenderResult>(GRAPHICAL_VIEW_RENDER_REQUEST, params, token);
-    }
-
-    resolveGraphicalViewTarget(
-        params: GraphicalViewResolveTargetParams,
-        token?: vscode.CancellationToken,
-    ): Promise<GraphicalViewResolveTargetResult> {
-        return this.sendRequest<GraphicalViewResolveTargetResult>(GRAPHICAL_VIEW_RESOLVE_TARGET_REQUEST, params, token);
-    }
-
-    resolveGraphicalViewAttributeTarget(
-        params: GraphicalViewResolveAttributeTargetParams,
-        token?: vscode.CancellationToken,
-    ): Promise<GraphicalViewResolveAttributeTargetResult> {
-        return this.sendRequest<GraphicalViewResolveAttributeTargetResult>(
-            GRAPHICAL_VIEW_RESOLVE_ATTRIBUTE_TARGET_REQUEST,
-            params,
-            token,
-        );
+    onDidChangeAvailability(listener: (available: boolean) => void): vscode.Disposable {
+        return this.availability.event(listener);
     }
 
 }

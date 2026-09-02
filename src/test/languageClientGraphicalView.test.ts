@@ -1,151 +1,108 @@
 /*
  * Copyright (c) 2026 Robert Bosch Manufacturing Solutions GmbH
- *
- * See the AUTHORS file(s) distributed with this work for additional
- * information regarding authorship.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
  * SPDX-License-Identifier: MPL-2.0
  */
 
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
-import {Trace} from 'vscode-jsonrpc';
-import {State, StateChangeEvent} from 'vscode-languageclient/node';
+import {LspGraphicalViewClient, GraphicalViewRequestTransport} from '../graphicalViewClient';
 import {
     GRAPHICAL_VIEW_RENDER_REQUEST,
     GRAPHICAL_VIEW_RESOLVE_ATTRIBUTE_TARGET_REQUEST,
     GRAPHICAL_VIEW_RESOLVE_TARGET_REQUEST,
     GraphicalViewRenderResult,
     GraphicalViewResolveTargetResult,
-    isGraphicalViewRenderResult,
 } from '../graphicalViewProtocol';
-import {LanguageClientAdapter, TurtleLanguageClient} from '../languageClient';
-import type {ExtensionLogger} from '../outputChannel';
 
-suite('TurtleLanguageClient graphical-view integration', () => {
-    test('forwards exact typed methods and render cancellation token', async () => {
-        const adapter = new FakeLanguageClientAdapter();
-        const client = new TurtleLanguageClient(new FakeLogger(), 1846, 'off', () => adapter);
-        await client.connect();
+suite('Graphical View typed LSP client', () => {
+    test('forwards exact render and resolve methods, parameters, and cancellation token', async () => {
+        const transport = new FakeTransport();
+        const client = new LspGraphicalViewClient(transport);
         const cancellation = new vscode.CancellationTokenSource();
 
-        const render = await client.renderGraphicalView({uri: 'file:///model.ttl'}, cancellation.token);
-        const resolve = await client.resolveGraphicalViewTarget({
-            sourceUri: 'file:///model.ttl',
-            elementUrn: 'urn:samm:example:1.0.0#Aspect',
-        });
-        const resolveAttribute = await client.resolveGraphicalViewAttributeTarget({
-            sourceUri: 'file:///model.ttl',
-            ownerUrn: 'urn:samm:example:1.0.0#Aspect',
-            predicateUrn: 'urn:samm:org.eclipse.esmf.samm:meta-model:2.2.0#description',
-            selection: 'singleOccurrence',
-            language: 'en',
-        });
+        await client.render({uri: 'file:///model.ttl', includeAttributeRows: true}, cancellation.token);
+        await client.resolveElement(
+            {sourceUri: 'file:///model.ttl', elementUrn: 'urn:samm:example:1.0.0#Aspect'},
+            cancellation.token,
+        );
+        await client.resolveAttribute(
+            {
+                sourceUri: 'file:///model.ttl',
+                ownerUrn: 'urn:samm:example:1.0.0#Aspect',
+                predicateUrn: 'urn:samm:org.eclipse.esmf.samm:meta-model:2.2.0#description',
+                selection: 'singleOccurrence',
+                language: 'en',
+            },
+            cancellation.token,
+        );
 
-        assert.equal(render.uri, 'file:///model.ttl');
-        assert.equal(resolve.warning, 'notFound');
-        assert.equal(resolveAttribute.warning, 'notFound');
-        assert.equal(adapter.requests[0].method, GRAPHICAL_VIEW_RENDER_REQUEST);
-        assert.equal(adapter.requests[0].token, cancellation.token);
-        assert.equal(adapter.requests[1].method, GRAPHICAL_VIEW_RESOLVE_TARGET_REQUEST);
-        assert.equal(adapter.requests[2].method, GRAPHICAL_VIEW_RESOLVE_ATTRIBUTE_TARGET_REQUEST);
+        assert.deepEqual(transport.requests.map(request => request.method), [
+            GRAPHICAL_VIEW_RENDER_REQUEST,
+            GRAPHICAL_VIEW_RESOLVE_TARGET_REQUEST,
+            GRAPHICAL_VIEW_RESOLVE_ATTRIBUTE_TARGET_REQUEST,
+        ]);
+        assert.ok(transport.requests.every(request => request.token === cancellation.token));
+        assert.deepEqual(transport.requests[0].params, {uri: 'file:///model.ttl', includeAttributeRows: true});
         cancellation.dispose();
     });
 
-    test('exposes disconnect and reconnect transitions once per availability change', async () => {
-        const adapter = new FakeLanguageClientAdapter();
-        const client = new TurtleLanguageClient(new FakeLogger(), 1846, 'off', () => adapter);
+    test('exposes transport availability without a second lifecycle state', () => {
+        const transport = new FakeTransport();
+        const client = new LspGraphicalViewClient(transport);
         const events: boolean[] = [];
-        const subscription = client.onDidChangeGraphicalViewAvailability(available => events.push(available));
+        const subscription = client.onDidChangeAvailability(available => events.push(available));
 
-        await client.connect();
-        adapter.transition(State.Starting);
-        adapter.transition(State.Stopped);
-        adapter.transition(State.Running);
-        assert.deepEqual(events, [true, false, true]);
+        transport.setAvailable(false);
+        transport.setAvailable(true);
+        assert.equal(client.isAvailable(), true);
+        assert.deepEqual(events, [false, true]);
         subscription.dispose();
     });
 
-    test('accepts Task 2 render warning JSON with omitted or explicit-null svg', () => {
-        const omittedSvg = JSON.parse(
-            '{"uri":"file:///model.ttl","targets":[],"warnings":["timeout"]}',
-        ) as unknown;
-        const nullSvg = JSON.parse(
-            '{"uri":"file:///model.ttl","svg":null,"targets":[],"warnings":["modelTooLarge"]}',
-        ) as unknown;
-        const missingSuccessfulSvg = JSON.parse(
-            '{"uri":"file:///model.ttl","targets":[],"warnings":[]}',
-        ) as unknown;
+    test('preserves omitted and explicit-null JSON wire fields', async () => {
+        const transport = new FakeTransport();
+        const client = new LspGraphicalViewClient(transport);
+        const cancellation = new vscode.CancellationTokenSource();
+        transport.renderResult = JSON.parse('{"uri":"file:///model.ttl","svg":null,"targets":[],"warnings":["timeout"]}');
+        const render = await client.render({uri: 'file:///model.ttl'}, cancellation.token);
+        transport.resolveResult = JSON.parse('{"location":null,"warning":null}');
+        const resolve = await client.resolveElement(
+            {sourceUri: 'file:///model.ttl', elementUrn: 'urn:samm:example:1.0.0#Aspect'},
+            cancellation.token,
+        );
 
-        assert.equal(isGraphicalViewRenderResult(omittedSvg), true);
-        assert.equal(isGraphicalViewRenderResult(nullSvg), true);
-        assert.equal(isGraphicalViewRenderResult(missingSuccessfulSvg), false);
-    });
-
-    test('models omitted and explicit-null resolve result fields from Task 2 JSON', () => {
-        const omittedLocation = JSON.parse('{"warning":"notFound"}') as GraphicalViewResolveTargetResult;
-        const omittedWarning = JSON.parse(
-            '{"location":{"uri":"file:///model.ttl","range":{"start":{"line":1,"character":2},"end":{"line":1,"character":3}}}}',
-        ) as GraphicalViewResolveTargetResult;
-        const explicitNulls = JSON.parse('{"location":null,"warning":null}') as GraphicalViewResolveTargetResult;
-
-        assert.equal(omittedLocation.location, undefined);
-        assert.equal(omittedLocation.warning, 'notFound');
-        assert.equal(omittedWarning.warning, undefined);
-        assert.equal(omittedWarning.location?.uri, 'file:///model.ttl');
-        assert.equal(explicitNulls.location, null);
-        assert.equal(explicitNulls.warning, null);
+        assert.equal(render.svg, null);
+        assert.equal(resolve.location, null);
+        assert.equal(resolve.warning, null);
+        cancellation.dispose();
     });
 });
 
-class FakeLanguageClientAdapter implements LanguageClientAdapter {
-    state = State.Stopped;
+class FakeTransport implements GraphicalViewRequestTransport {
     readonly requests: Array<{method: string; params: unknown; token: vscode.CancellationToken | undefined}> = [];
-    private readonly listeners = new Set<(event: StateChangeEvent) => void>();
+    renderResult: GraphicalViewRenderResult = {uri: 'file:///model.ttl', svg: '<svg/>', targets: [], warnings: []};
+    resolveResult: GraphicalViewResolveTargetResult = {location: null, warning: 'notFound'};
+    private available = true;
+    private readonly listeners = new Set<(available: boolean) => void>();
 
-    setTrace(_value: Trace): void {}
-
-    start(): Promise<void> {
-        this.transition(State.Running);
-        return Promise.resolve();
+    isAvailable(): boolean {
+        return this.available;
     }
 
-    stop(): Promise<void> {
-        this.transition(State.Stopped);
-        return Promise.resolve();
-    }
-
-    onDidChangeState(listener: (event: StateChangeEvent) => void): vscode.Disposable {
+    onDidChangeAvailability(listener: (available: boolean) => void): vscode.Disposable {
         this.listeners.add(listener);
         return new vscode.Disposable(() => this.listeners.delete(listener));
     }
 
     sendRequest<R>(method: string, params?: unknown, token?: vscode.CancellationToken): Promise<R> {
         this.requests.push({method, params, token});
-        if (method === GRAPHICAL_VIEW_RENDER_REQUEST) {
-            const result: GraphicalViewRenderResult = {uri: 'file:///model.ttl', svg: '<svg/>', targets: [], warnings: []};
-            return Promise.resolve(result as R);
-        }
-        const result: GraphicalViewResolveTargetResult = {location: null, warning: 'notFound'};
-        return Promise.resolve(result as R);
+        return Promise.resolve((method === GRAPHICAL_VIEW_RENDER_REQUEST ? this.renderResult : this.resolveResult) as R);
     }
 
-    transition(newState: State): void {
-        const oldState = this.state;
-        this.state = newState;
+    setAvailable(available: boolean): void {
+        this.available = available;
         for (const listener of [...this.listeners]) {
-            listener({oldState, newState});
+            listener(available);
         }
     }
-}
-
-class FakeLogger implements ExtensionLogger {
-    trace(_message: string): void {}
-    info(_message: string): void {}
-    warn(_message: string): void {}
-    error(_message: string | Error): void {}
 }

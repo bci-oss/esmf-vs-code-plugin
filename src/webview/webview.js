@@ -22,7 +22,6 @@
     const diagram = document.querySelector('#diagram');
     const status = document.querySelector('#status');
     const zoomValue = document.querySelector('#zoom-value');
-    const testMode = document.documentElement.dataset.testMode === 'true';
     let currentVersion = null;
     let currentSvg = null;
     let baseWidth = 0;
@@ -101,9 +100,6 @@
             if (notifyRendered) {
                 vscode.postMessage({type: 'rendered', version});
             }
-            if (testMode) {
-                vscode.postMessage({type: 'testState', state});
-            }
         });
     }
 
@@ -173,12 +169,6 @@
         } catch (error) {
             status.textContent = 'The new diagram could not be displayed safely. The last valid diagram is retained.';
             vscode.postMessage({type: 'renderError', version: message.version, reason: 'sanitizationFailed'});
-            if (testMode) {
-                vscode.postMessage({
-                    type: 'testRenderDiagnostic',
-                    message: error instanceof Error ? error.message : 'Unknown render failure',
-                });
-            }
         }
     }
 
@@ -236,22 +226,6 @@
         ) {
             status.textContent = message.status.message;
             return;
-        }
-        if (testMode && isExactMessage(message, ['scrollLeft', 'scrollTop', 'type', 'zoom']) && message.type === 'testSetViewport') {
-            state = normalizeState({schemaVersion: 1, zoom: message.zoom, scrollLeft: message.scrollLeft, scrollTop: message.scrollTop});
-            applyZoom();
-            restoreViewport(currentVersion, false);
-            return;
-        }
-        if (testMode && isExactMessage(message, ['targetId', 'type']) && message.type === 'testClickMarker') {
-            const marker = diagram.querySelector(`g[id="${CSS.escape(message.targetId)}"]`);
-            const hitTarget = marker?.querySelector('polygon') ?? marker;
-            hitTarget?.dispatchEvent(new MouseEvent('click', {bubbles: true}));
-            return;
-        }
-        if (testMode && isExactMessage(message, ['key', 'targetId', 'type']) && message.type === 'testKeyMarker') {
-            const marker = diagram.querySelector(`g[id="${CSS.escape(message.targetId)}"]`);
-            marker?.dispatchEvent(new KeyboardEvent('keydown', {key: message.key, bubbles: true}));
         }
     });
 
