@@ -1,21 +1,34 @@
-# RDF/Turtle and SAMM Aspect Models
+# Semantic Models for VS Code
 
-VS Code extension for the ESMF SDK Turtle language server. The extension supports prefix `Go to Definition`, fast syntax feedback while typing, and server-driven heavy Aspect validation for SAMM-style Turtle models.
+Semantic Models for VS Code is a Visual Studio Code extension for editing
+RDF/Turtle documents, including [SAMM Aspect Models](https://eclipse-esmf.github.io/samm-specification/snapshot/index.html) of the [Eclipse Semantic Modeling Framework (ESMF)](https://eclipse-esmf.github.io/esmf-documentation/index.html).
+
+For RDF/Turtle documents, it features syntax highlighting, document outline and
+automatic syntax validation. For SAMM Aspect Models, the extension additionally
+features *Go to Definition* for elements and semantic model validation.
 
 ## Configuration
 
-- `turtle.languageServerSettings.activateEmbeddedLanguageServer` (boolean, default: `true`)
-  - When enabled, the extension starts the SAMM CLI language server process. When disabled, an external language server must be started manually.
-- `turtle.languageServerSettings.automaticUpdateCheck` (boolean, default: `true`)
-  - Automatically check for updates of the SAMM CLI language server and notify when a new version is available.
-- `turtle.languageServerSettings.sammCliPath` (string)
-  - Path to the SAMM CLI executable or jar file to use as the language server. Can be downloaded / set via the 'Select SAMM CLI Executable' command.
-- `turtle.languageServerSettings.serverPort` (number, default: `1846`)
-  - TCP port used to connect to the Turtle/SAMM language server.
-- `turtle.languageServerSettings.traceLevel` (string, default: `off`)
-  - Controls the verbosity of language client protocol tracing. Options: `off`, `messages`, `verbose`.
+- `semantic-models.languageServerSettings.activateEmbeddedLanguageServer` (boolean, default: `true`)
+  - When enabled, the extension starts the SAMM language server process. When disabled, an external language server must be started manually.
+- `semantic-models.languageServerSettings.automaticUpdateCheck` (boolean, default: `true`)
+  - Automatically check for updates to the SAMM language server and notify when a new version is available.
+- `semantic-models.languageServerSettings.sammCliPath` (string)
+  - Path to the SAMM CLI executable or JAR file to use as the language server. Can be downloaded or selected using the 'Select SAMM CLI Executable' command.
+- `semantic-models.languageServerSettings.serverPort` (number, default: `1846`)
+  - TCP port used to connect to the SAMM language server.
+- `semantic-models.languageServerSettings.traceLevel` (string, default: `off`)
+  - Controls the verbosity of Language Server Protocol (LSP) tracing. Options: `off`, `messages`, `verbose`.
+- `semantic-models.modelResolution.githubRepositories` (array, default: `[]`)
+  - Additional GitHub repositories to use for Aspect Model Resolution (e.g. `Go to Definition` and validation of models referencing Aspect Models hosted in other repositories). Each entry supports:
+    - `repository` (string, required) - repository in the format `owner/repository`, e.g. `eclipse-esmf/esmf-sdk`.
+    - `branch` (string, default: `main`) - branch to resolve Aspect Models from. Must not be set together with `tag`.
+    - `tag` (string) - tag to resolve Aspect Models from. Must not be set together with `branch`.
+    - `path` (string, default: `/`) - path inside the repository under which Aspect Models are located.
+    - `token` (string) - GitHub token for authentication. If omitted, the repository is accessed anonymously.
+  - Whenever this setting changes, the extension validates that each repository exists and is accessible, and shows an error notification (with a link to the settings) if a problem is found, e.g. a missing repository, invalid/expired token, or exceeded API rate limits.
 
-Use the command `Turtle: Select SAMM CLI Executable` to choose either:
+Use the command `Semantic Models: Select SAMM CLI Executable` to choose either:
 - one of the latest SAMM CLI GitHub releases, or
 - a custom executable path from your local file system.
 
@@ -23,10 +36,10 @@ Use the command `Turtle: Select SAMM CLI Executable` to choose either:
 
 - Prefix `Go to Definition` inside Turtle files.
 - Two-level validation:
-  - Fast feedback on type from the regular Turtle parser diagnostics provided by the server (appear in the editor and `Problems`).
-  - Heavy Aspect validation from the server for model-level issues (results shown in notifications and status bar).
+  - Fast validation while typing from the regular Turtle parser diagnostics provided by the server (appear in the editor and `Problems`).
+  - Full Aspect validation from the server for model-level issues (results shown in notifications and status bar).
 - Manual validation command:
-  - `Turtle: Validate document now`
+  - `Semantic Models: Validate Document Now`
 
 ## Graphical View
 
@@ -38,52 +51,53 @@ Element headers can navigate to definitions in local files. Eligible attribute r
 
 If rendering fails, the last successful diagram remains visible with an error or warning. Rendering is limited to 1,000 boxes and a 30-second request timeout. The graphical view is not an editor, does not update live while typing, and does not claim visual parity with the Aspect Model Editor.
 
-## Run The Server And Extension Together
+## Running the Server and Extension Together
 
-1. In this extension project, install dependencies with `npm install`.
-2. Compile the extension with `npm run build`.
+1. In this extension project, install the dependencies using `npm install`.
+2. Build the extension with `npm run build`.
 3. Press `F5` in VS Code to open an Extension Development Host.
-4. Open a Turtle file such as [samples/valid.ttl](samples/valid.ttl) or your Aspect model file.
+4. Open an RDF/Turtle file such as [samples/valid.ttl](samples/valid.ttl) or your Aspect model file.
 
-If the server cannot be downloaded or started, the extension shows an error and leaves a detailed message in the Turtle LSP output channel.
+If the server cannot be downloaded or started, the extension shows an error and writes a detailed message in the Turtle LSP output channel.
 
 ## Validation Behavior
 
-Fast feedback on type:
+Fast feedback while typing:
 
 - Driven by the server's regular Turtle parsing diagnostics.
-- Results appear in the editor and `Problems` panel.
+- Results appear in the editor and `Problems` view.
 - Intended for quick editor feedback while you type.
 
-Heavy Aspect validation:
+Full Aspect validation:
 
 - Runs on the server, not in the extension.
 - Results are displayed in notification messages (for manual validation) or status bar (for save-triggered validation).
 - Always uses detailed server validation messaging when the server returns report text.
 - Always shows visible progress for long-running validation.
-- Runs automatically on save and can also be triggered manually.
+- Runs automatically when saving and can also be triggered manually.
 
 When each validation runs:
 
 - On type: fast syntax feedback only.
 - On save: heavy Aspect validation for Turtle documents.
-- Manual: `Turtle: Validate document now` for the active Turtle document.
+- Manual: `Semantic Models: Validate Document Now` for the active Turtle document.
 
 ## Commands
 
-- `Turtle: Validate document now`
+- `Semantic Models: Validate Document Now`
   - Sends a server request for the active Turtle document.
-- `Turtle: Select SAMM CLI Executable`
-  - Opens a quick pick with the latest 10 GitHub releases and a custom-path option.
-- `Turtle: Restart and reconnect to Language Server`
+- `Semantic Models: Select SAMM CLI Executable`
+  - Opens a quick pick with the latest ten GitHub releases and a custom-path option.
+- `Semantic Models: Restart Language Server Connection`
   - Restarts the language server and reconnects the client.
 
 ## UX During Long-Running Validation
 
 - Manual validation shows a progress notification while the request is running.
-- Save-triggered validation always uses a short status-bar progress indicator instead of repeated popups.
+- Save-triggered validation always uses a short status-bar progress indicator
+  instead of repeated pop-up notifications.
 - After completion, the user gets a summary message with validation results.
-- Automatic save validation keeps progress and completion feedback in the status bar.
+- Automatic save validation keeps progress and completion status in the status bar.
 
 ## Verify Go To Definition
 
@@ -106,9 +120,9 @@ Use [samples/org.eclipse.esmf.test/1.0.0/Aspect.ttl](samples/org.eclipse.esmf.te
 Manual check:
 
 1. Open an Aspect model file.
-2. Run `Turtle: Validate document now`.
-3. Wait for the progress indicator to finish.
-4. Confirm that validation results appear in a notification message.
+2. Run `Semantic Models: Validate Document Now`.
+3. Wait for validation to complete.
+4. Confirm that validation results are displayed in a notification.
 
 On-save check:
 

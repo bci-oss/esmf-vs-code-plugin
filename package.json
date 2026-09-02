@@ -1,9 +1,9 @@
 {
-  "name": "turtle",
-  "displayName": "RDF/Turtle and SAMM Aspect Models",
-  "description": "Support for RDF/Turtle and SAMM Aspect Models",
+  "name": "semantic-models",
+  "displayName": "Semantic Models",
+  "description": "Support for RDF/Turtle documents, including SAMM Aspect Models",
   "version": "0.0.1",
-  "publisher": "ESMF",
+  "publisher": "eclipse-esmf",
   "icon": "media/esmf-logo.png",
   "license": "MPL-2.0",
   "repository": {
@@ -26,24 +26,24 @@
   "contributes": {
     "commands": [
       {
-        "command": "turtle.validateDocumentNow",
-        "title": "Validate document now",
-        "category": "Turtle"
+        "command": "semantic-models.validateDocumentNow",
+        "title": "Validate Document Now",
+        "category": "Semantic Models"
       },
       {
-        "command": "turtle.restartLanguageServices",
-        "title": "Restart and reconnect to Language Server",
-        "category": "Turtle"
+        "command": "semantic-models.restartLanguageServices",
+        "title": "Restart Language Server Connection",
+        "category": "Semantic Models"
       },
       {
-        "command": "turtle.selectSammCliExecutable",
+        "command": "semantic-models.selectSammCliExecutable",
         "title": "Select SAMM CLI Executable",
-        "category": "Turtle"
+        "category": "Semantic Models"
       },
       {
-        "command": "turtle.openGraphicalView",
+        "command": "semantic-models.openGraphicalView",
         "title": "Open Graphical View",
-        "category": "Turtle",
+        "category": "Semantic Models",
         "enablement": "editorLangId == turtle",
         "icon": {
           "light": "media/aspect-model-editor-targetsize-192.png",
@@ -66,35 +66,35 @@
       }
     ],
     "configuration": {
-      "title": "RDF/Turtle and SAMM Aspect Models",
+      "title": "Semantic Models",
       "type": "object",
-      "description": "Configuration settings for RDF/Turtle and SAMM Aspect Models extension.",
+      "description": "Configuration settings for the Semantic Models extension.",
       "properties": {
-        "turtle.languageServerSettings.activateEmbeddedLanguageServer": {
+        "semantic-models.languageServerSettings.activateEmbeddedLanguageServer": {
           "type": "boolean",
           "default": true,
-          "description": "When enabled, the extension starts the SAMM CLI language server process at the path configured below. When disabled, an external language server must be started manually.",
+          "description": "When enabled, the extension starts the SAMM language server using the executable configured below. When disabled, an external language server must be started manually.",
           "order": 0
         },
-        "turtle.languageServerSettings.automaticUpdateCheck": {
+        "semantic-models.languageServerSettings.automaticUpdateCheck": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically check for updates of the SAMM CLI language server and notify when a new version is available.",
+          "description": "Automatically check for updates to the SAMM language server and notify when a new version is available.",
           "order": 1
         },
-        "turtle.languageServerSettings.sammCliPath": {
+        "semantic-models.languageServerSettings.sammCliPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the SAMM CLI executable or jar file to use as the language server. Can be downloaded / set via the 'Select SAMM CLI Executable' command.",
+          "description": "Path to the SAMM CLI executable or JAR file to use as the language server. Can be downloaded or selected using the 'Select SAMM CLI Executable' command.",
           "order": 2
         },
-        "turtle.languageServerSettings.serverPort": {
+        "semantic-models.languageServerSettings.serverPort": {
           "type": "number",
           "default": 1846,
-          "description": "TCP port used to connect to the Turtle/SAMM language server.",
+          "description": "TCP port used to connect to the SAMM language server.",
           "order": 3
         },
-        "turtle.languageServerSettings.traceLevel": {
+        "semantic-models.languageServerSettings.traceLevel": {
           "type": "string",
           "enum": [
             "off",
@@ -107,8 +107,50 @@
             "Log full message contents."
           ],
           "default": "off",
-          "description": "Controls the verbosity of language client protocol tracing in the output channel.",
+          "description": "Controls the verbosity of Language Server Protocol (LSP) tracing in the output channel.",
           "order": 4
+        },
+        "semantic-models.modelResolution.githubRepositories": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "repository": {
+                "type": "string",
+                "default": "",
+                "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+                "patternErrorMessage": "Must be in the format \"owner/repository\".",
+                "markdownDescription": "GitHub repository to use for Aspect Model Resolution. Format: `owner/repository`. Example: `eclipse-esmf/esmf-sdk`."
+              },
+              "branch": {
+                "type": "string",
+                "default": "main",
+                "description": "Branch to resolve Aspect Models from. Must not be set together with \"tag\"."
+              },
+              "tag": {
+                "type": "string",
+                "default": "",
+                "description": "Tag to resolve Aspect Models from. Must not be set together with \"branch\"."
+              },
+              "path": {
+                "type": "string",
+                "default": "/",
+                "description": "Path inside the repository under which Aspect Models are located."
+              },
+              "token": {
+                "type": "string",
+                "default": "",
+                "description": "GitHub token used for authentication when accessing this repository. If not provided, the repository will be accessed anonymously."
+              }
+            },
+            "required": [
+              "repository"
+            ],
+            "additionalProperties": false
+          },
+          "default": [],
+          "markdownDescription": "Additional GitHub repositories to be used for Aspect Model Resolution. Enables e.g. go to Definition and validation of models that reference Aspect Models in other repositories. Each entry must specify the repository in the format `owner/repository`, and may optionally specify a branch/tag, path, and GitHub token for authentication.",
+          "order": 5
         }
       }
     },
@@ -120,19 +162,19 @@
     "menus": {
       "editor/title": [
         {
-          "command": "turtle.openGraphicalView",
+          "command": "semantic-models.openGraphicalView",
           "when": "resourceLangId == turtle",
           "group": "navigation@10"
         }
       ],
       "editor/context": [
         {
-          "command": "turtle.validateDocumentNow",
+          "command": "semantic-models.validateDocumentNow",
           "when": "resourceLangId == turtle",
           "group": "1_modification"
         },
         {
-          "command": "turtle.openGraphicalView",
+          "command": "semantic-models.openGraphicalView",
           "when": "resourceLangId == turtle",
           "group": "1_modification@2"
         }
@@ -140,14 +182,14 @@
     },
     "walkthroughs": [
       {
-        "id": "turtle-getting-started",
-        "title": "Getting Started with RDF/Turtle and SAMM Aspect Models Extension",
-        "description": "Learn how to use the RDF/Turtle and SAMM Aspect Models extension to validate your Turtle files and SAMM aspect models.\nThis walkthrough will guide you through the key features of the extension, including validating your Turtle files and SAMM aspect models using the integrated language server.",
+        "id": "semantic-models-getting-started",
+        "title": "Getting Started with the Semantic Models Extension",
+        "description": "Learn how to use the Semantic Models extension to edit and validate your RDF/Turtle files, including SAMM Aspect Models.\nThis walkthrough will guide you through the key features of the extension, including validating your RDF/Turtle files and SAMM Aspect Models using the integrated language server.",
         "steps": [
           {
-            "id": "select-SAMM CLI",
-            "title": "Selecting a SAMM CLI Executable",
-            "description": "Initial setup requires you to either download or manually select a SAMM CLI, containing the required SAMM Language Server \n[Download or Select SAMM CLI](command:turtle.selectSammCliExecutable)",
+            "id": "select-samm-cli",
+            "title": "Select a SAMM CLI Executable",
+            "description": "Complete the initial setup by downloading or selecting a SAMM CLI executable, which provides the required SAMM Language Server.\n[Download or Select SAMM CLI](command:turtle.selectSammCliExecutable)",
             "media": {
               "image": "media/walkthrough_select_samm_cli.png",
               "altText": "Example of selecting a SAMM CLI executable"
@@ -155,8 +197,8 @@
           },
           {
             "id": "validation",
-            "title": "Validating Turtle Files and SAMM Aspect Models",
-            "description": "To validate a Turtle file or a SAMM aspect model, simply open it in VS Code. The extension will automatically connect to the language server and display any validation issues in the Problems panel. You can also trigger validation manually using the 'Validate document now' command from the Command Palette.",
+            "title": "Validating RDF/Turtle Files and SAMM Aspect Models",
+            "description": "To validate an RDF/Turtle file or a SAMM Aspect Model, simply open it in VS Code. The extension will automatically connect to the language server and display any validation issues in the Problems view. You can also trigger validation manually using the 'Validate Document Now' command from the Command Palette.",
             "media": {
               "image": "media/walkthrough_validation.png",
               "altText": "Example of validation issues shown in the Problems panel"

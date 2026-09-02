@@ -19,7 +19,7 @@ import type { RequestClient } from './aspectValidation';
 import type {GraphicalViewRequestTransport} from './graphicalViewClient';
 import type { ExtensionLogger } from './outputChannel';
 
-const CLIENT_START_TIMEOUT_MS = 5000;
+const CLIENT_START_TIMEOUT_MS = 60_000;
 
 export class TurtleLanguageClient implements RequestClient, GraphicalViewRequestTransport {
     private readonly client: LanguageClient;
@@ -65,6 +65,7 @@ export class TurtleLanguageClient implements RequestClient, GraphicalViewRequest
             documentSelector: ['turtle'],
             synchronize: {
                 fileEvents: vscode.workspace.createFileSystemWatcher('**/*.ttl'),
+                configurationSection: 'semantic-models.modelResolution',
             },
         };
 

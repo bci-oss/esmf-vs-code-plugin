@@ -17,14 +17,16 @@ import { TurtleLanguageServer } from './languageServer';
 import { SammCliDownloader } from './sammCliDownloader';
 import { TurtleExtensionSettings } from './settings';
 import { TurtleLanguageClient } from './languageClient';
+import { GitHubRepositoryValidator } from './githubRepositoryValidator';
 import type { ExtensionLogger } from './outputChannel';
 import { GraphicalViewController } from './graphicalView';
 import {LspGraphicalViewClient} from './graphicalViewClient';
 import { VscodeGraphicalViewPanelFactory } from './graphicalViewPanel';
 
-const SELECT_EXECUTABLE_COMMAND = 'turtle.selectSammCliExecutable';
+const SELECT_EXECUTABLE_COMMAND = 'semantic-models.selectSammCliExecutable';
 const SELECT_EXECUTABLE_TITLE = 'Select SAMM CLI Executable';
-const RESTART_LANGUAGE_SERVICES_COMMAND = 'turtle.restartLanguageServices';
+const RESTART_LANGUAGE_SERVICES_COMMAND = 'semantic-models.restartLanguageServices';
+const GITHUB_REPOSITORY_VALIDATION_DEBOUNCE_MS = 2000;
 
 let settings: TurtleExtensionSettings;
 let languageServer: TurtleLanguageServer | undefined;
@@ -32,10 +34,12 @@ let languageClient: TurtleLanguageClient;
 let aspectValidationController: AspectValidationController;
 let graphicalViewController: GraphicalViewController;
 let sammCliDownloader: SammCliDownloader;
+let gitHubRepositoryValidator: GitHubRepositoryValidator;
 
 let outputChannel: ExtensionLogger;
 let context: vscode.ExtensionContext;
 let restartChain: Promise<void> = Promise.resolve();
+let githubRepositoryValidationTimeout: ReturnType<typeof setTimeout> | undefined;
 
 export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     context = ctx;
@@ -44,6 +48,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     outputChannel = logOutputChannel;
     settings = new TurtleExtensionSettings();
     sammCliDownloader = new SammCliDownloader(context, settings, outputChannel);
+    gitHubRepositoryValidator = new GitHubRepositoryValidator(outputChannel);
     languageClient = new TurtleLanguageClient(outputChannel, settings.getSammCliLspServerPort(), settings.getLanguageClientTraceLevel());
     aspectValidationController = new AspectValidationController(createUnavailableClient(), vscode.window, vscode.workspace, outputChannel);
     aspectValidationController.register(context);
@@ -83,6 +88,20 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     graphicalViewController.register(context);
 
     context.subscriptions.push(
+        vscode.languages.setLanguageConfiguration('turtle', {
+            onEnterRules: [
+                {
+                    beforeText: /\.\s*$/,
+                    action: {
+                        indentAction: vscode.IndentAction.Outdent,
+                        appendText: "\n"
+                    },
+                },
+            ],
+        })
+    );
+
+    context.subscriptions.push(
         vscode.commands.registerCommand(SELECT_EXECUTABLE_COMMAND, async () => {
             await selectSammCliExecutable();
         }),
@@ -90,11 +109,16 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
             await queueLanguageServicesRestart('Manual restart command');
         }),
         vscode.workspace.onDidChangeConfiguration((e: vscode.ConfigurationChangeEvent) => {
-            if (e.affectsConfiguration('turtle.languageServerSettings')) {
+            if (e.affectsConfiguration('semantic-models.languageServerSettings')) {
                 void queueLanguageServicesRestart('Configuration change detected');
+            }
+            if (e.affectsConfiguration('semantic-models.modelResolution')) {
+                scheduleGithubRepositoryValidation();
             }
         })
     );
+
+    void validateConfiguredGithubRepositories();
 
     if (settings.isEmbeddedLanguageServerStartEnabled() && !settings.getSammCliPath()) {
         const selection = await vscode.window.showErrorMessage(
@@ -116,6 +140,23 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     }
 }
 
+async function validateConfiguredGithubRepositories(): Promise<void> {
+    await gitHubRepositoryValidator.validate(settings.getGithubRepositories());
+}
+
+// Wait for configuration edits to settle (e.g. while the user is still typing in settings.json)
+// before validating, instead of validating after every keystroke.
+function scheduleGithubRepositoryValidation(): void {
+    if (githubRepositoryValidationTimeout) {
+        clearTimeout(githubRepositoryValidationTimeout);
+    }
+
+    githubRepositoryValidationTimeout = setTimeout(() => {
+        githubRepositoryValidationTimeout = undefined;
+        void validateConfiguredGithubRepositories();
+    }, GITHUB_REPOSITORY_VALIDATION_DEBOUNCE_MS);
+}
+
 function queueLanguageServicesRestart(reason: string): Promise<void> {
     restartChain = restartChain
         .then(() => restartLanguageServices(reason))
@@ -124,7 +165,7 @@ function queueLanguageServicesRestart(reason: string): Promise<void> {
             if (selection === 'Configure SAMM CLI Executable') {
                 void selectSammCliExecutable();
             } else if (selection === 'Check Extension Settings') {
-                void vscode.commands.executeCommand('workbench.action.openSettings', 'turtle.languageServerSettings');
+                void vscode.commands.executeCommand('workbench.action.openSettings', 'semantic-models.languageServerSettings');
             }
         });
 
@@ -282,8 +323,8 @@ async function promptForCustomExecutablePath(): Promise<string | undefined> {
         canSelectFiles: true,
         canSelectFolders: false,
         canSelectMany: false,
-        openLabel: 'Use this executable / jar',
-        title: 'Select SAMM CLI executable / jar',
+        openLabel: 'Use this executable / JAR',
+        title: 'Select SAMM CLI executable / JAR',
     });
 
     return selection?.[0]?.fsPath;
@@ -298,7 +339,10 @@ function createUnavailableClient(): RequestClient {
 }
 
 export async function deactivate(): Promise<void> {
-    graphicalViewController?.dispose();
+    if (githubRepositoryValidationTimeout) {
+        clearTimeout(githubRepositoryValidationTimeout);
+        githubRepositoryValidationTimeout = undefined;
+    }
     await restartChain;
     await languageClient.disconnect();
     await stopLanguageServer();
