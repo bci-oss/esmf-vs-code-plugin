@@ -52,7 +52,7 @@ suite('Graphical View editor-title manifest contract', () => {
         assert.deepEqual(commands[0], {
             command: OPEN_GRAPHICAL_VIEW_COMMAND,
             title: 'Open Graphical View',
-            category: 'Turtle',
+            category: 'Semantic Models',
             enablement: 'editorLangId == turtle',
             icon: {light: ICON_PATH, dark: ICON_PATH},
         });

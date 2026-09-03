@@ -224,7 +224,7 @@ export async function openGraphicalView(
     document: GraphicalViewDocument,
 ): Promise<void> {
     harness.window.activeTextEditor = {document};
-    await harness.commands.execute('turtle.openGraphicalView');
+    await harness.commands.execute('semantic-models.openGraphicalView');
 }
 
 export function lastStatus(panel: FakeGraphicalViewPanel): GraphicalViewStatus | undefined {

@@ -15,7 +15,7 @@ import {randomBytes} from 'node:crypto';
 import * as vscode from 'vscode';
 import {GRAPHICAL_VIEW_MARKER_PATTERN} from './graphicalViewProtocol';
 
-const VIEW_TYPE = 'turtle.graphicalView';
+const VIEW_TYPE = 'semantic-models.graphicalView';
 export const WEBVIEW_ASSET_DIRECTORY = Object.freeze(['out', 'webview'] as const);
 export const WEBVIEW_SCRIPT_ORDER = Object.freeze(['purify.min.js', 'sanitizer-contract.js', 'webview.js'] as const);
 

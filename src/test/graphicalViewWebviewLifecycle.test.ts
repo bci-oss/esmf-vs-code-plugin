@@ -19,7 +19,7 @@ suite('GraphicalView real webview lifecycle', function () {
         this.timeout(30_000);
         const extensionUri = vscode.Uri.file(join(__dirname, '..', '..'));
         const panel = vscode.window.createWebviewPanel(
-            'turtle.graphicalViewLifecycleTest',
+            'semantic-models.graphicalViewLifecycleTest',
             'Graphical View Lifecycle Test',
             vscode.ViewColumn.One,
             createGraphicalViewPanelOptions(extensionUri),

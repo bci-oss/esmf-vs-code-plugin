@@ -43,7 +43,7 @@ Use the command `Semantic Models: Select SAMM CLI Executable` to choose either:
 
 ## Graphical View
 
-Use `Turtle: Open Graphical View` (`turtle.openGraphicalView`) from the Turtle editor-title button, the editor context menu, or the Command Palette to open a read-only SVG snapshot in a separate panel. One panel is reused per Turtle document.
+Use `Semantic Models: Open Graphical View` (`semantic-models.openGraphicalView`) from the Turtle editor-title button, the editor context menu, or the Command Palette to open a read-only SVG snapshot in a separate panel. One panel is reused per Turtle document.
 
 The view renders on initial open, manual Refresh, and Save while the main Turtle document is visible. It includes unsaved text from the main document but uses the persisted versions of imported files. Typing, import saves, hidden-document saves, and revealing an existing panel do not trigger a render.
 

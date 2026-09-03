@@ -24,7 +24,7 @@ import {
 import type {GraphicalViewRenderResult, GraphicalViewRenderWarning, GraphicalViewTarget} from './graphicalViewProtocol';
 import {AcceptedGraphicalViewResult, acceptGraphicalViewResult, isGraphicalViewRenderResult} from './graphicalViewResult';
 
-export const OPEN_GRAPHICAL_VIEW_COMMAND = 'turtle.openGraphicalView';
+export const OPEN_GRAPHICAL_VIEW_COMMAND = 'semantic-models.openGraphicalView';
 
 export interface GraphicalViewDocument {
     readonly languageId: string;

@@ -189,7 +189,7 @@
           {
             "id": "select-samm-cli",
             "title": "Select a SAMM CLI Executable",
-            "description": "Complete the initial setup by downloading or selecting a SAMM CLI executable, which provides the required SAMM Language Server.\n[Download or Select SAMM CLI](command:turtle.selectSammCliExecutable)",
+            "description": "Complete the initial setup by downloading or selecting a SAMM CLI executable, which provides the required SAMM Language Server.\n[Download or Select SAMM CLI](command:semantic-models.selectSammCliExecutable)",
             "media": {
               "image": "media/walkthrough_select_samm_cli.png",
               "altText": "Example of selecting a SAMM CLI executable"
