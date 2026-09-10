@@ -147,13 +147,21 @@ export function createGraphicalViewShell(
 </head>
 <body>
     <div id="toolbar" role="toolbar" aria-label="Graphical view controls">
-        <button id="refresh" type="button" aria-label="Refresh graphical view" title="Refresh">Refresh</button>
-        <button id="zoom-out" type="button" aria-label="Zoom out" title="Zoom out">−</button>
-        <output id="zoom-value" aria-live="polite">100%</output>
-        <button id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in">+</button>
-        <button id="zoom-reset" type="button" aria-label="Reset zoom to 100 percent" title="Reset zoom">100%</button>
-        <button id="zoom-fit" type="button" aria-label="Fit diagram to view" title="Fit to view">Fit</button>
-        <p id="status" role="status">Preparing graphical view...</p>
+        <div id="toolbar-controls">
+            <button id="refresh" class="primary-action" type="button" aria-label="Refresh graphical view" title="Refresh">Refresh</button>
+            <span class="toolbar-separator" aria-hidden="true"></span>
+            <div id="zoom-controls" role="group" aria-label="Zoom controls">
+                <button id="zoom-out" class="toolbar-action icon-action" type="button" aria-label="Zoom out" title="Zoom out">−</button>
+                <output id="zoom-value" aria-live="polite">100%</output>
+                <button id="zoom-in" class="toolbar-action icon-action" type="button" aria-label="Zoom in" title="Zoom in">+</button>
+                <button id="zoom-reset" class="toolbar-action" type="button" aria-label="Reset zoom to 100 percent" title="Reset zoom">Reset</button>
+                <button id="zoom-fit" class="toolbar-action" type="button" aria-label="Fit diagram to view" title="Fit to view">Fit</button>
+            </div>
+        </div>
+        <p id="status" role="status" aria-live="polite" aria-atomic="true" data-kind="loading" title="Preparing graphical view...">
+            <span id="status-indicator" aria-hidden="true"></span>
+            <span id="status-text">Preparing graphical view...</span>
+        </p>
     </div>
     <main id="viewport" tabindex="0" aria-label="Scrollable graphical view">
         <div id="diagram" aria-live="off"></div>

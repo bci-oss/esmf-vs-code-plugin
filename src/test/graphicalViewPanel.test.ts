@@ -71,6 +71,43 @@ suite('GraphicalView secure panel contract', () => {
         assert.ok(first.includes('/out/webview/webview.css'));
     });
 
+    test('creates accessible compact controls and a live status presentation', () => {
+        const extensionUri = vscode.Uri.file('/tmp/graphical-view-extension');
+        const webview = {
+            cspSource: 'vscode-webview-resource:',
+            asWebviewUri: (uri: vscode.Uri) => uri.with({scheme: 'vscode-webview-resource'}),
+        };
+        const shell = createGraphicalViewShell(webview, extensionUri);
+
+        assert.match(shell, /id="zoom-reset"[^>]*aria-label="Reset zoom to 100 percent"[^>]*>Reset<\/button>/);
+        assert.match(shell, /id="zoom-controls" role="group" aria-label="Zoom controls"/);
+        assert.match(shell, /id="status" role="status" aria-live="polite" aria-atomic="true" data-kind="loading"/);
+        assert.match(shell, /id="status-indicator" aria-hidden="true"/);
+        assert.match(shell, /id="status-text">Preparing graphical view\.\.\.<\/span>/);
+    });
+
+    test('styles all status kinds with theme-aware responsive layout and a loading indicator', () => {
+        const stylesheet = readFileSync(join(__dirname, '..', '..', 'src', 'webview', 'webview.css'), 'utf8');
+
+        for (const kind of ['ready', 'loading', 'stale', 'unsupported', 'disconnected']) {
+            assert.ok(stylesheet.includes(`#status[data-kind="${kind}"]`));
+        }
+        for (const themeVariable of [
+            '--vscode-testing-iconPassed',
+            '--vscode-progressBar-background',
+            '--vscode-notificationsWarningIcon-foreground',
+            '--vscode-notificationsErrorIcon-foreground',
+            '--vscode-panel-border',
+            '--vscode-foreground',
+        ]) {
+            assert.ok(stylesheet.includes(themeVariable));
+        }
+        assert.match(stylesheet, /#toolbar\s*{[^}]*flex-wrap: wrap;/s);
+        assert.match(stylesheet, /#status\[data-kind="loading"\] #status-indicator\s*{[^}]*animation: status-spin/s);
+        assert.match(stylesheet, /#status\[data-kind="stale"\],[\s\S]*flex: 1 0 100%;/);
+        assert.match(stylesheet, /@media \(max-width: 520px\)/);
+    });
+
     test('accepts only exact production webview messages', () => {
         assert.deepEqual(parseGraphicalViewPanelMessage({type: 'ready'}), {type: 'ready'});
         assert.deepEqual(parseGraphicalViewPanelMessage({type: 'refresh'}), {type: 'refresh'});

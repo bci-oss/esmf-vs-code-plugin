@@ -21,7 +21,9 @@
     const viewport = document.querySelector('#viewport');
     const diagram = document.querySelector('#diagram');
     const status = document.querySelector('#status');
+    const statusText = document.querySelector('#status-text');
     const zoomValue = document.querySelector('#zoom-value');
+    const STATUS_KINDS = Object.freeze(['loading', 'ready', 'stale', 'unsupported', 'disconnected']);
     let currentVersion = null;
     let currentSvg = null;
     let baseWidth = 0;
@@ -58,6 +60,21 @@
 
     function updateZoomLabel() {
         zoomValue.textContent = `${Math.round(state.zoom * 100)}%`;
+    }
+
+    function updateStatus(candidate) {
+        if (
+            !candidate ||
+            typeof candidate !== 'object' ||
+            Array.isArray(candidate) ||
+            !STATUS_KINDS.includes(candidate.kind) ||
+            typeof candidate.message !== 'string'
+        ) {
+            return;
+        }
+        status.setAttribute('data-kind', candidate.kind);
+        status.setAttribute('title', candidate.message);
+        statusText.textContent = candidate.message;
     }
 
     function captureViewport() {
@@ -167,7 +184,10 @@
             applyZoom();
             restoreViewport(currentVersion, true);
         } catch (error) {
-            status.textContent = 'The new diagram could not be displayed safely. The last valid diagram is retained.';
+            updateStatus({
+                kind: 'stale',
+                message: 'The new diagram could not be displayed safely. The last valid diagram is retained.',
+            });
             vscode.postMessage({type: 'renderError', version: message.version, reason: 'sanitizationFailed'});
         }
     }
@@ -222,10 +242,9 @@
             isExactMessage(message, ['status', 'type']) &&
             message.type === 'status' &&
             message.status &&
-            typeof message.status.message === 'string'
+            typeof message.status === 'object'
         ) {
-            status.textContent = message.status.message;
-            return;
+            updateStatus(message.status);
         }
     });
 

@@ -28,6 +28,7 @@ suite('Graphical View webview controller', () => {
             ['#diagram', diagram],
             ['#viewport', viewport],
             ['#status', new FakeElement()],
+            ['#status-text', new FakeElement()],
             ['#zoom-value', new FakeElement()],
             ['#refresh', new FakeElement()],
             ['#zoom-in', new FakeElement()],
@@ -89,6 +90,65 @@ suite('Graphical View webview controller', () => {
         ]);
         assert.equal(prevented, 2);
         assert.deepEqual(JSON.parse(JSON.stringify(state.value)), {schemaVersion: 1, zoom: 1, scrollLeft: 0, scrollTop: 0});
+    });
+
+    test('applies only allow-listed status kinds and preserves complete status text safely', () => {
+        const source = readFileSync(join(__dirname, '..', '..', 'src', 'webview', 'webview.js'), 'utf8');
+        const status = new FakeElement();
+        const statusText = new FakeElement();
+        const elements = new Map<string, FakeElement>([
+            ['#diagram', new FakeElement()],
+            ['#viewport', new FakeElement()],
+            ['#status', status],
+            ['#status-text', statusText],
+            ['#zoom-value', new FakeElement()],
+            ['#refresh', new FakeElement()],
+            ['#zoom-in', new FakeElement()],
+            ['#zoom-out', new FakeElement()],
+            ['#zoom-reset', new FakeElement()],
+            ['#zoom-fit', new FakeElement()],
+        ]);
+        const window = new FakeElement();
+        runInNewContext(source, {
+            acquireVsCodeApi: () => ({
+                getState: () => undefined,
+                setState: () => undefined,
+                postMessage: () => undefined,
+            }),
+            document: {querySelector: (selector: string) => elements.get(selector)},
+            window,
+            Element: FakeElement,
+            SanitizerContract: {MARKER_PATTERN: /^$/, sanitizeSvg: () => undefined},
+            requestAnimationFrame: () => undefined,
+            setTimeout: () => 0,
+            Number,
+            Object,
+            Math,
+            Error,
+        });
+
+        for (const kind of ['loading', 'ready', 'stale', 'unsupported', 'disconnected']) {
+            const message = `${kind} <b>complete text</b>`;
+            window.fire('message', {data: {type: 'status', status: {kind, message}}});
+            assert.equal(status.attributes.get('data-kind'), kind);
+            assert.equal(status.attributes.get('title'), message);
+            assert.equal(statusText.textContent, message);
+            assert.equal(status.textContent, '');
+        }
+
+        const acceptedKind = status.attributes.get('data-kind');
+        const acceptedText = statusText.textContent;
+        for (const malformed of [
+            {type: 'status', status: {kind: 'unknown', message: 'Unknown'}},
+            {type: 'status', status: {kind: 'ready', message: 42}},
+            {type: 'status', status: null},
+            {type: 'status', status: ['ready']},
+            {type: 'status', status: {kind: 'ready', message: 'Injected'}, extra: true},
+        ]) {
+            window.fire('message', {data: malformed});
+            assert.equal(status.attributes.get('data-kind'), acceptedKind);
+            assert.equal(statusText.textContent, acceptedText);
+        }
     });
 });
 
