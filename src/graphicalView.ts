@@ -393,11 +393,11 @@ export class GraphicalViewController implements vscode.Disposable {
         } else if (state.lastSuccess?.version !== version) {
             return;
         }
-        this.outputChannel.warn('Graphical view rejected an SVG payload at the secure rendering boundary.');
+        this.outputChannel.warn('Graphical view rejected an SVG payload at the strict XML rendering boundary.');
         this.setStale(
             state,
-            'sanitizationFailed',
-            'The new diagram could not be displayed safely. The last successful diagram is retained.',
+            'xmlParsingFailed',
+            'The new diagram is not a usable SVG document. The last successful diagram is retained.',
         );
     }
 

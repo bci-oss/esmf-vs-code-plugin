@@ -55,8 +55,30 @@ suite('GraphicalView real webview lifecycle', function () {
             await waitFor(() => hasMessage(messages, 'rendered', 2), 'multilingual replacement render');
             assert.equal(messages.some(message => isRecord(message) && message.type === 'renderError'), false);
 
-            await panel.webview.postMessage({type: 'render', version: 3, svg: '<svg><script>alert(1)</script></svg>'});
-            await waitFor(() => hasMessage(messages, 'renderError', 3), 'fail-closed hostile render');
+            await panel.webview.postMessage({
+                type: 'render',
+                version: 3,
+                svg: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><text>&#1;</text></svg>',
+            });
+            await waitFor(() => hasMessage(messages, 'renderError', 3), 'XML-forbidden control rejection');
+            await panel.webview.postMessage({type: 'render', version: 4, svg: '<html width="10" height="10"/>'});
+            await waitFor(() => hasMessage(messages, 'renderError', 4), 'non-SVG root rejection');
+            await panel.webview.postMessage({
+                type: 'render',
+                version: 5,
+                svg: '<svg xmlns="http://www.w3.org/2000/svg" width="0" height="10"/>',
+            });
+            await waitFor(() => hasMessage(messages, 'renderError', 5), 'invalid dimension rejection');
+            await panel.webview.postMessage({type: 'render', version: 6, svg: ''});
+            await waitFor(() => hasMessage(messages, 'renderError', 6), 'missing root rejection');
+            await panel.webview.postMessage({
+                type: 'render',
+                version: 7,
+                svg: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>',
+            });
+            await waitFor(() => hasMessage(messages, 'renderError', 7), 'multiple root rejection');
+            await panel.webview.postMessage({type: 'render', version: 8, svg: '<svg width="10" height="10"/>'});
+            await waitFor(() => hasMessage(messages, 'renderError', 8), 'wrong namespace rejection');
         } finally {
             subscription.dispose();
             panel.dispose();
@@ -65,8 +87,7 @@ suite('GraphicalView real webview lifecycle', function () {
 });
 
 function graphperSvg(marker: string): string {
-    return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" height="1600pt" width="2200pt" viewBox="0 0 2200 1600">
-<style>@font-face { font-family: Roboto Condensed; }</style>
+    return `<svg xmlns="http://www.w3.org/2000/svg" height="1600pt" width="2200pt" viewBox="0 0 2200 1600">
 <g id="graph_root" class="graph" transform="scale(1 1) rotate(0)">
 <g id="${marker}" class="node">
 <polygon id="${marker}_polygon" points="10,10 2190,10 2190,1590 10,1590" fill="#ffffff" stroke="#000000" stroke-width="1" cx="0" cy="0" rx="0" ry="0"></polygon>

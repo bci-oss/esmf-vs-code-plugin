@@ -51,6 +51,8 @@ Element headers can navigate to definitions in local files. Eligible attribute r
 
 If rendering fails, the last successful diagram remains visible with an error or warning. Rendering is limited to 1,000 boxes and a 30-second request timeout. The graphical view is not an editor, does not update live while typing, and does not claim visual parity with the Aspect Model Editor.
 
+Graphical View supports SVG only from the shipped/current trusted SAMM language server and generator contract. The extension strict-parses each SVG as XML but does not sanitize or filter its elements and attributes. Its restrictive webview CSP and extension-side message, sidecar, and local-file navigation validation remain enforced. External, substituted, incompatible, or compromised language servers are outside the supported security model; future Graphper or generator changes must preserve the tested style-free passive-output invariant.
+
 ## Running the Server and Extension Together
 
 1. In this extension project, install the dependencies using `npm install`.

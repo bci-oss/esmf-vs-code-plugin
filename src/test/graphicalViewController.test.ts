@@ -178,7 +178,7 @@ suite('GraphicalViewController lifecycle', () => {
         harness.controller.dispose();
     });
 
-    test('retains the last accepted diagram for warning, transport, and sanitizer failures', async () => {
+    test('retains the last accepted diagram for warning, transport, and XML parsing failures', async () => {
         const harness = createGraphicalViewHarness();
         const document = track(harness, '/tmp/retention.ttl');
         await openGraphicalView(harness, document);
@@ -202,7 +202,7 @@ suite('GraphicalViewController lifecycle', () => {
 
         assert.equal(renderDeliveries(panel).at(-1)?.svg, retained.svg);
         assert.equal(lastStatus(panel)?.kind, 'stale');
-        assert.ok(harness.outputChannel.lines.some(line => line.includes('secure rendering boundary')));
+        assert.ok(harness.outputChannel.lines.some(line => line.includes('strict XML rendering boundary')));
         harness.controller.dispose();
     });
 

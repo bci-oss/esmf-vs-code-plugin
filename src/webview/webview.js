@@ -17,6 +17,9 @@
     const MIN_ZOOM = 0.25;
     const MAX_ZOOM = 4;
     const ZOOM_FACTOR = 1.2;
+    const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+    const MARKER_PATTERN = /^gv-(?:header|attribute)-[a-z0-9]{16,32}$/;
+    const POSITIVE_DIMENSION_PATTERN = /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?(?:pt)?$/;
     const vscode = acquireVsCodeApi();
     const viewport = document.querySelector('#viewport');
     const diagram = document.querySelector('#diagram');
@@ -82,15 +85,37 @@
     }
 
     function dimensions(svg) {
-        const width = Number.parseFloat(svg.getAttribute('width'));
-        const height = Number.parseFloat(svg.getAttribute('height'));
-        const viewBox = svg.viewBox?.baseVal;
-        const resolvedWidth = Number.isFinite(width) && width > 0 ? width : viewBox?.width;
-        const resolvedHeight = Number.isFinite(height) && height > 0 ? height : viewBox?.height;
-        if (!Number.isFinite(resolvedWidth) || resolvedWidth <= 0 || !Number.isFinite(resolvedHeight) || resolvedHeight <= 0) {
+        const width = parseDimension(svg.getAttribute('width'));
+        const height = parseDimension(svg.getAttribute('height'));
+        if (width === undefined || height === undefined) {
             throw new Error('SVG dimensions are unavailable');
         }
-        return {width: resolvedWidth, height: resolvedHeight};
+        return {width, height};
+    }
+
+    function parseDimension(value) {
+        if (typeof value !== 'string' || !POSITIVE_DIMENSION_PATTERN.test(value)) {
+            return undefined;
+        }
+        const parsed = Number(value.endsWith('pt') ? value.slice(0, -2) : value);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+    }
+
+    function parseTrustedSvg(svgText) {
+        const parsed = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+        if (parsed.getElementsByTagName('parsererror').length > 0) {
+            throw new Error('SVG is not well-formed XML');
+        }
+        const svg = parsed.documentElement;
+        if (!svg || svg.localName !== 'svg' || svg.namespaceURI !== SVG_NAMESPACE) {
+            throw new Error('SVG document root is invalid');
+        }
+        dimensions(svg);
+        const imported = document.importNode(svg, true);
+        if (!(imported instanceof Element) || imported.localName !== 'svg' || imported.namespaceURI !== SVG_NAMESPACE) {
+            throw new Error('SVG document root could not be imported');
+        }
+        return imported;
     }
 
     function applyZoom() {
@@ -173,11 +198,11 @@
             if (currentSvg) {
                 captureViewport();
             }
-            const sanitized = SanitizerContract.sanitizeSvg(message.svg);
-            const size = dimensions(sanitized.svg);
-            makeNavigationMarkersInteractive(sanitized.svg);
-            diagram.replaceChildren(sanitized.fragment);
-            currentSvg = sanitized.svg;
+            const parsedSvg = parseTrustedSvg(message.svg);
+            const size = dimensions(parsedSvg);
+            makeNavigationMarkersInteractive(parsedSvg);
+            diagram.replaceChildren(parsedSvg);
+            currentSvg = parsedSvg;
             currentVersion = message.version;
             baseWidth = size.width;
             baseHeight = size.height;
@@ -186,9 +211,9 @@
         } catch (error) {
             updateStatus({
                 kind: 'stale',
-                message: 'The new diagram could not be displayed safely. The last valid diagram is retained.',
+                message: 'The new diagram is not a usable SVG document. The last valid diagram is retained.',
             });
-            vscode.postMessage({type: 'renderError', version: message.version, reason: 'sanitizationFailed'});
+            vscode.postMessage({type: 'renderError', version: message.version, reason: 'xmlParsingFailed'});
         }
     }
 
@@ -207,7 +232,7 @@
 
     function makeNavigationMarkersInteractive(svg) {
         for (const group of svg.querySelectorAll('g[id]')) {
-            if (SanitizerContract.MARKER_PATTERN.test(group.id)) {
+            if (MARKER_PATTERN.test(group.id)) {
                 group.setAttribute('tabindex', '0');
                 group.setAttribute('role', 'link');
                 group.setAttribute('aria-label', group.id.startsWith('gv-attribute-')
@@ -219,7 +244,7 @@
 
     function activateNavigationTarget(target) {
         const group = target instanceof Element ? target.closest('g[id]') : null;
-        if (!group || !diagram.contains(group) || !SanitizerContract.MARKER_PATTERN.test(group.id) || !Number.isInteger(currentVersion)) {
+        if (!group || !diagram.contains(group) || !MARKER_PATTERN.test(group.id) || !Number.isInteger(currentVersion)) {
             return false;
         }
         vscode.postMessage({type: 'navigate', version: currentVersion, targetId: group.id});

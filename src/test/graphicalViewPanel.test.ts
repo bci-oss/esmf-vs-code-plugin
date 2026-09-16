@@ -56,8 +56,8 @@ suite('GraphicalView secure panel contract', () => {
             "font-src vscode-webview-resource:; img-src 'none'; connect-src 'none'; object-src 'none'; " +
             "base-uri 'none'; form-action 'none'";
         assert.ok(first.includes(`content="${expectedCsp}"`));
-        assert.equal((first.match(/<script /g) ?? []).length, 3);
-        assert.equal(first.split(`nonce="${firstNonce}"`).length - 1, 3);
+        assert.equal((first.match(/<script /g) ?? []).length, 1);
+        assert.equal(first.split(`nonce="${firstNonce}"`).length - 1, 1);
         assert.equal(first.includes(`<script nonce="${firstNonce}">`), false);
         assert.equal(first.includes('http://'), false);
         assert.equal(first.includes('https://'), false);
@@ -112,6 +112,11 @@ suite('GraphicalView secure panel contract', () => {
         assert.deepEqual(parseGraphicalViewPanelMessage({type: 'ready'}), {type: 'ready'});
         assert.deepEqual(parseGraphicalViewPanelMessage({type: 'refresh'}), {type: 'refresh'});
         assert.deepEqual(parseGraphicalViewPanelMessage({type: 'rendered', version: 1}), {type: 'rendered', version: 1});
+        assert.deepEqual(parseGraphicalViewPanelMessage({type: 'renderError', version: 1, reason: 'xmlParsingFailed'}), {
+            type: 'renderError',
+            version: 1,
+            reason: 'xmlParsingFailed',
+        });
         assert.deepEqual(
             parseGraphicalViewPanelMessage({type: 'navigate', version: 2, targetId: 'gv-attribute-aaaaaaaaaaaaaaaa'}),
             {type: 'navigate', version: 2, targetId: 'gv-attribute-aaaaaaaaaaaaaaaa'},
@@ -121,7 +126,7 @@ suite('GraphicalView secure panel contract', () => {
             {type: 'navigate', version: 2, targetId: 'bad'},
             {type: 'navigate', version: 2, targetId: 'gv-header-aaaaaaaaaaaaaaaa', uri: 'file:///tmp/evil.ttl'},
             {type: 'rendered', version: 0},
-            {type: 'renderError', version: 1, reason: 'other'},
+            {type: 'renderError', version: 1, reason: 'sanitizationFailed'},
         ]) {
             assert.equal(parseGraphicalViewPanelMessage(message), undefined);
         }
@@ -130,17 +135,13 @@ suite('GraphicalView secure panel contract', () => {
     test('build output contains only the deterministic webview inventory and reference hashes', () => {
         const outputDirectory = join(__dirname, '..', 'webview');
         const expectedFiles = [
-            'DOMPurify-LICENSE-Apache-2.0.txt',
-            'DOMPurify-LICENSE-MPL-2.0.txt',
+            'RobotoCondensed-LICENSE-Apache-2.0.txt',
             'RobotoCondensed-NOTICE.txt',
             'RobotoCondensed-Regular.ttf',
-            'purify.min.js',
-            'sanitizer-contract.js',
             'webview.css',
             'webview.js',
         ];
         assert.deepEqual(readdirSync(outputDirectory).sort(), expectedFiles);
-        assert.equal(sha256(join(outputDirectory, 'purify.min.js')), '9ab3d44d73c3e3947f9ab72e0f0bc15c7f1931d60b365ba261fc85fe59013c56');
         assert.equal(
             sha256(join(outputDirectory, 'RobotoCondensed-Regular.ttf')),
             '4a7c36df4318fee50a8159c3a0ebde4572abab65447ae4a651c2fe87212302b5',
@@ -149,8 +150,11 @@ suite('GraphicalView secure panel contract', () => {
 
     test('webview controller retains a stable DOM sink and persists passive viewport state only', () => {
         const controllerSource = readFileSync(join(__dirname, '..', '..', 'src', 'webview', 'webview.js'), 'utf8');
-        assert.ok(controllerSource.includes('diagram.replaceChildren(sanitized.fragment)'));
-        assert.equal(/innerHTML|outerHTML|insertAdjacentHTML/.test(controllerSource), false);
+        assert.ok(controllerSource.includes("new DOMParser().parseFromString(svgText, 'image/svg+xml')"));
+        assert.ok(controllerSource.includes('document.importNode(svg, true)'));
+        assert.ok(controllerSource.includes('diagram.replaceChildren(parsedSvg)'));
+        assert.equal(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(controllerSource), false);
+        assert.equal(/DOMPurify|SanitizerContract|ALLOWED_TAGS|ALLOWED_ATTR/.test(controllerSource), false);
         assert.ok(controllerSource.includes('vscode.getState()'));
         assert.ok(controllerSource.includes('vscode.setState(state)'));
         assert.ok(controllerSource.includes('schemaVersion: 1'));

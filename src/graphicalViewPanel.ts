@@ -17,7 +17,7 @@ import {GRAPHICAL_VIEW_MARKER_PATTERN} from './graphicalViewProtocol';
 
 const VIEW_TYPE = 'semantic-models.graphicalView';
 export const WEBVIEW_ASSET_DIRECTORY = Object.freeze(['out', 'webview'] as const);
-export const WEBVIEW_SCRIPT_ORDER = Object.freeze(['purify.min.js', 'sanitizer-contract.js', 'webview.js'] as const);
+export const WEBVIEW_SCRIPT_ORDER = Object.freeze(['webview.js'] as const);
 
 export type GraphicalViewStatus =
     | Readonly<{kind: 'loading'; message: string}>
@@ -34,7 +34,7 @@ export type GraphicalViewPanelMessage =
     | Readonly<{type: 'ready'}>
     | Readonly<{type: 'refresh'}>
     | Readonly<{type: 'rendered'; version: number}>
-    | Readonly<{type: 'renderError'; version: number; reason: 'sanitizationFailed'}>
+    | Readonly<{type: 'renderError'; version: number; reason: 'xmlParsingFailed'}>
     | Readonly<{type: 'navigate'; version: number; targetId: string}>;
 
 export interface GraphicalViewPanel extends vscode.Disposable {
@@ -167,8 +167,6 @@ export function createGraphicalViewShell(
         <div id="diagram" aria-live="off"></div>
     </main>
     <script nonce="${nonce}" src="${scriptUris[0]}"></script>
-    <script nonce="${nonce}" src="${scriptUris[1]}"></script>
-    <script nonce="${nonce}" src="${scriptUris[2]}"></script>
 </body>
 </html>`;
 }
@@ -188,9 +186,9 @@ export function parseGraphicalViewPanelMessage(value: unknown): GraphicalViewPan
     }
     if (value.type === 'renderError'
         && hasExactKeys(keys, ['reason', 'type', 'version'])
-        && value.reason === 'sanitizationFailed'
+        && value.reason === 'xmlParsingFailed'
         && isDisplayedVersion(value.version)) {
-        return value as {type: 'renderError'; version: number; reason: 'sanitizationFailed'};
+        return value as {type: 'renderError'; version: number; reason: 'xmlParsingFailed'};
     }
     if (value.type === 'navigate'
         && hasExactKeys(keys, ['targetId', 'type', 'version'])

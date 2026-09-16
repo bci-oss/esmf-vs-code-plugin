@@ -3,14 +3,9 @@
  * SPDX-License-Identifier: MPL-2.0
  */
 
-import {readFileSync, readdirSync, statSync} from 'node:fs';
+import {readdirSync, statSync} from 'node:fs';
 import {join} from 'node:path';
-import {extensionRoot, outputDirectory, sha256, webviewAssets} from './webview-assets.mjs';
-
-const packageJson = JSON.parse(readFileSync(join(extensionRoot, 'package.json'), 'utf8'));
-if (packageJson.dependencies?.dompurify !== '3.4.13') {
-    throw new Error('DOMPurify must remain pinned exactly to 3.4.13.');
-}
+import {outputDirectory, sha256, webviewAssets} from './webview-assets.mjs';
 
 const actual = readdirSync(outputDirectory).sort();
 const expected = webviewAssets.map(asset => asset.destination).sort();

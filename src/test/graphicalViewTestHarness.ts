@@ -125,7 +125,7 @@ export class FakeGraphicalViewPanel implements GraphicalViewPanel {
             this.emitMessage(
                 this.renderOutcome === 'success'
                     ? {type: 'rendered', version: delivery.version}
-                    : {type: 'renderError', version: delivery.version, reason: 'sanitizationFailed'},
+                    : {type: 'renderError', version: delivery.version, reason: 'xmlParsingFailed'},
             );
         }
     }

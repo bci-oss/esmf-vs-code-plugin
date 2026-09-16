@@ -12,12 +12,10 @@ export const extensionRoot = resolve(dirname(fileURLToPath(import.meta.url)), '.
 export const outputDirectory = resolve(extensionRoot, 'out', 'webview');
 
 export const webviewAssets = Object.freeze([
-    asset('node_modules/dompurify/LICENSE', 'DOMPurify-LICENSE-Apache-2.0.txt'),
-    asset('node_modules/dompurify/LICENSE-MPL', 'DOMPurify-LICENSE-MPL-2.0.txt'),
     asset(
-        'node_modules/dompurify/dist/purify.min.js',
-        'purify.min.js',
-        '9ab3d44d73c3e3947f9ab72e0f0bc15c7f1931d60b365ba261fc85fe59013c56',
+        'src/webview/RobotoCondensed-LICENSE-Apache-2.0.txt',
+        'RobotoCondensed-LICENSE-Apache-2.0.txt',
+        '8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90',
     ),
     asset('src/webview/RobotoCondensed-NOTICE.txt', 'RobotoCondensed-NOTICE.txt'),
     asset(
@@ -25,7 +23,6 @@ export const webviewAssets = Object.freeze([
         'RobotoCondensed-Regular.ttf',
         '4a7c36df4318fee50a8159c3a0ebde4572abab65447ae4a651c2fe87212302b5',
     ),
-    asset('src/webview/sanitizer-contract.js', 'sanitizer-contract.js'),
     asset('src/webview/webview.css', 'webview.css'),
     asset('src/webview/webview.js', 'webview.js'),
 ]);

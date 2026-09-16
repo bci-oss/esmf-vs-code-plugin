@@ -46,19 +46,13 @@ suite('Graphical View webview controller', () => {
                 },
                 postMessage: (message: unknown) => posted.push(message),
             }),
-            document: {querySelector: (selector: string) => elements.get(selector)},
+            document: {
+                querySelector: (selector: string) => elements.get(selector),
+                importNode: (node: FakeElement) => node,
+            },
             window,
             Element: FakeElement,
-            SanitizerContract: {
-                MARKER_PATTERN: /^gv-(?:header|attribute)-[a-z0-9]{16,32}$/,
-                sanitizeSvg: (svgText: string) => {
-                    const id = svgText.match(/gv-(?:header|attribute)-[a-z0-9]{16,32}/)?.[0];
-                    assert.ok(id);
-                    const marker = new FakeElement(id);
-                    const svg = new FakeSvg(marker);
-                    return {fragment: {marker}, svg};
-                },
-            },
+            DOMParser: FakeDomParser,
             requestAnimationFrame: (callback: () => void) => callback(),
             setTimeout: (callback: () => void) => {
                 callback();
@@ -115,10 +109,13 @@ suite('Graphical View webview controller', () => {
                 setState: () => undefined,
                 postMessage: () => undefined,
             }),
-            document: {querySelector: (selector: string) => elements.get(selector)},
+            document: {
+                querySelector: (selector: string) => elements.get(selector),
+                importNode: (node: FakeElement) => node,
+            },
             window,
             Element: FakeElement,
-            SanitizerContract: {MARKER_PATTERN: /^$/, sanitizeSvg: () => undefined},
+            DOMParser: FakeDomParser,
             requestAnimationFrame: () => undefined,
             setTimeout: () => 0,
             Number,
@@ -165,7 +162,11 @@ class FakeElement {
     contains: (candidate: unknown) => boolean = () => false;
     replaceChildren: (fragment: unknown) => void = () => undefined;
 
-    constructor(readonly id = '') {}
+    constructor(
+        readonly id = '',
+        readonly localName = 'g',
+        readonly namespaceURI = 'http://www.w3.org/2000/svg',
+    ) {}
 
     addEventListener(type: string, listener: (event: never) => void): void {
         this.listeners.set(type, listener);
@@ -185,10 +186,8 @@ class FakeElement {
 }
 
 class FakeSvg extends FakeElement {
-    readonly viewBox = {baseVal: {width: 2200, height: 1600}};
-
     constructor(private readonly marker: FakeElement) {
-        super();
+        super('', 'svg');
     }
 
     getAttribute(name: string): string | null {
@@ -197,6 +196,26 @@ class FakeSvg extends FakeElement {
 
     querySelectorAll(): FakeElement[] {
         return [this.marker];
+    }
+}
+
+class FakeDomParser {
+    parseFromString(svgText: string, mediaType: string): FakeXmlDocument {
+        assert.equal(mediaType, 'image/svg+xml');
+        const id = svgText.match(/gv-(?:header|attribute)-[a-z0-9]{16,32}/)?.[0];
+        const marker = new FakeElement(id ?? '');
+        return new FakeXmlDocument(new FakeSvg(marker), svgText.includes('<parsererror'));
+    }
+}
+
+class FakeXmlDocument {
+    constructor(
+        readonly documentElement: FakeSvg,
+        private readonly parserError: boolean,
+    ) {}
+
+    getElementsByTagName(name: string): unknown[] {
+        return name === 'parsererror' && this.parserError ? [{}] : [];
     }
 }
 
