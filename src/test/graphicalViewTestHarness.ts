@@ -191,9 +191,19 @@ export class FakeGraphicalViewPanelFactory implements GraphicalViewPanelFactory 
 }
 
 export function createGraphicalViewHarness(client = new FakeGraphicalViewClient()) {
+    return createHarness(client, new FakeWindow());
+}
+
+export function createGraphicalViewHarnessWithWindow<TWindow extends GraphicalViewWindow>(
+    window: TWindow,
+    client = new FakeGraphicalViewClient(),
+) {
+    return createHarness(client, window);
+}
+
+function createHarness<TWindow extends GraphicalViewWindow>(client: FakeGraphicalViewClient, window: TWindow) {
     const panels = new FakeGraphicalViewPanelFactory();
     const commands = new FakeCommands();
-    const window = new FakeWindow();
     const workspace = new FakeWorkspace();
     const outputChannel = new FakeOutputChannel();
     const controller = new GraphicalViewController(client, panels, commands, window, workspace, outputChannel);
@@ -254,16 +264,19 @@ class FakeCommands implements GraphicalViewCommands {
     }
 }
 
-class FakeWindow implements GraphicalViewWindow {
+export class FakeWindow implements GraphicalViewWindow {
     activeTextEditor: {document: GraphicalViewDocument} | undefined;
+    readonly tabGroups: {all: vscode.TabGroup[]} = {all: []};
     readonly warnings: string[] = [];
     readonly openedEditors: Array<{
         uri: vscode.Uri;
         options: vscode.TextDocumentShowOptions | undefined;
         editor: vscode.TextEditor;
         revealedRanges: vscode.Range[];
+        revealTypes: Array<vscode.TextEditorRevealType | undefined>;
     }> = [];
     showTextDocumentFailure: unknown | undefined;
+    showTextDocumentPromise: Promise<vscode.TextEditor> | undefined;
 
     showWarningMessage(message: string): Promise<unknown> {
         this.warnings.push(message);
@@ -274,12 +287,19 @@ class FakeWindow implements GraphicalViewWindow {
         if (this.showTextDocumentFailure !== undefined) {
             return Promise.reject(this.showTextDocumentFailure);
         }
+        if (this.showTextDocumentPromise !== undefined) {
+            return this.showTextDocumentPromise;
+        }
         const revealedRanges: vscode.Range[] = [];
+        const revealTypes: Array<vscode.TextEditorRevealType | undefined> = [];
         const editor = {
             selection: new vscode.Selection(0, 0, 0, 0),
-            revealRange: (range: vscode.Range) => revealedRanges.push(range),
+            revealRange: (range: vscode.Range, revealType?: vscode.TextEditorRevealType) => {
+                revealedRanges.push(range);
+                revealTypes.push(revealType);
+            },
         } as unknown as vscode.TextEditor;
-        this.openedEditors.push({uri, options, editor, revealedRanges});
+        this.openedEditors.push({uri, options, editor, revealedRanges, revealTypes});
         return Promise.resolve(editor);
     }
 }

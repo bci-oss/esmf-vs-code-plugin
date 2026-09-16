@@ -33,8 +33,39 @@ export interface GraphicalViewDocument {
 
 export interface GraphicalViewWindow {
     readonly activeTextEditor: {readonly document: GraphicalViewDocument} | undefined;
+    readonly tabGroups: {
+        readonly all: readonly GraphicalViewTabGroup[];
+    };
     showWarningMessage(message: string): Thenable<unknown>;
     showTextDocument(uri: vscode.Uri, options?: vscode.TextDocumentShowOptions): Thenable<vscode.TextEditor>;
+}
+
+export interface GraphicalViewTabGroup {
+    readonly viewColumn: vscode.ViewColumn;
+    readonly tabs: readonly {
+        readonly input: unknown;
+        readonly isActive: boolean;
+    }[];
+}
+
+export function findReusableTextEditorViewColumn(
+    uri: vscode.Uri,
+    groups: readonly GraphicalViewTabGroup[],
+): vscode.ViewColumn | undefined {
+    const canonicalUri = uri.toString();
+    let firstMatchingColumn: vscode.ViewColumn | undefined;
+    for (const group of groups) {
+        for (const tab of group.tabs) {
+            if (!(tab.input instanceof vscode.TabInputText) || tab.input.uri.toString() !== canonicalUri) {
+                continue;
+            }
+            if (tab.isActive) {
+                return group.viewColumn;
+            }
+            firstMatchingColumn ??= group.viewColumn;
+        }
+    }
+    return firstMatchingColumn;
 }
 
 export interface GraphicalViewWorkspace {
@@ -401,7 +432,11 @@ export class GraphicalViewController implements vscode.Disposable {
             }
 
             try {
-                const editor = await this.window.showTextDocument(resolution.uri, {preview: false});
+                const viewColumn = findReusableTextEditorViewColumn(resolution.uri, this.window.tabGroups.all);
+                const options: vscode.TextDocumentShowOptions = viewColumn === undefined
+                    ? {preview: false}
+                    : {preview: false, viewColumn};
+                const editor = await this.window.showTextDocument(resolution.uri, options);
                 if (!this.isCurrentNavigationResult(state, accepted, target)) {
                     return;
                 }
