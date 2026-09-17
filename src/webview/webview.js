@@ -249,8 +249,9 @@
     }
 
     function applyFit(version) {
-        const availableWidth = Math.max(1, viewport.clientWidth - VIEWPORT_PADDING);
-        const availableHeight = Math.max(1, viewport.clientHeight - VIEWPORT_PADDING);
+        const fitMeasurement = {width: viewport.clientWidth, height: viewport.clientHeight};
+        const availableWidth = Math.max(1, fitMeasurement.width - VIEWPORT_PADDING);
+        const availableHeight = Math.max(1, fitMeasurement.height - VIEWPORT_PADDING);
         state = {
             ...state,
             zoom: clamp(Math.min(availableWidth / baseWidth, availableHeight / baseHeight), MIN_ZOOM, MAX_ZOOM),
@@ -258,7 +259,7 @@
             scrollTop: 0,
         };
         applyZoom();
-        restoreViewport(version, {width: viewport.clientWidth, height: viewport.clientHeight});
+        restoreViewport(version, fitMeasurement);
     }
 
     function normalizeWheelDelta(event) {

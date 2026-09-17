@@ -50,6 +50,27 @@ suite('Graphical View viewport', () => {
         assert.equal(harness.savedState.zoom, 976 / 2200);
     });
 
+    test('first Fit retains the geometry used by its formula when applying zoom synchronously removes scrollbars', () => {
+        const harness = new WebviewHarness();
+        harness.viewport.clientWidth = 985;
+        harness.viewport.clientHeight = 785;
+        harness.viewport.onSvgResize = () => {
+            harness.viewport.onSvgResize = undefined;
+            harness.viewport.clientWidth = 1000;
+            harness.viewport.clientHeight = 800;
+        };
+
+        harness.render(1, 2200, 1600);
+        assert.equal(harness.svg?.width, 961);
+        harness.flushFrame();
+
+        assert.equal(harness.hasPosted('rendered', 1), false);
+        assert.equal(harness.svg?.width, 976);
+        harness.flushFrame();
+        assert.equal(harness.hasPosted('rendered', 1), true);
+        assert.equal(harness.savedState.zoom, 976 / 2200);
+    });
+
     test('rejected first SVG leaves Fit pending for the next valid render', () => {
         const harness = new WebviewHarness();
         harness.message({type: 'render', version: 1, svg: '<parsererror'});
@@ -453,6 +474,7 @@ class FakeViewport extends FakeElement {
     clientWidth = 1000;
     clientHeight = 800;
     currentSvg: () => FakeSvg | undefined = () => undefined;
+    onSvgResize?: () => void;
     private left = 0;
     private top = 0;
 
@@ -523,6 +545,7 @@ class FakeSvg extends FakeElement {
         } else if (name === 'height') {
             this.height = Number(value);
         }
+        this.viewport?.onSvgResize?.();
     }
 
     querySelectorAll(): FakeElement[] {
