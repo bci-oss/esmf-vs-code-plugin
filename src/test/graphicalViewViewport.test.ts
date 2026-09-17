@@ -32,6 +32,24 @@ suite('Graphical View viewport', () => {
         assert.equal(bounds.top, 50 + 12 + (776 - 1600 * (976 / 2200)) / 2);
     });
 
+    test('first Fit is recomputed after transient scrollbar geometry settles', () => {
+        const harness = new WebviewHarness();
+        harness.viewport.clientWidth = 985;
+        harness.viewport.clientHeight = 785;
+        harness.render(1, 2200, 1600);
+
+        assert.equal(harness.svg?.width, 961);
+        harness.viewport.clientWidth = 1000;
+        harness.viewport.clientHeight = 800;
+        harness.flushFrame();
+
+        assert.equal(harness.hasPosted('rendered', 1), false);
+        assert.equal(harness.svg?.width, 976);
+        harness.flushFrame();
+        assert.equal(harness.hasPosted('rendered', 1), true);
+        assert.equal(harness.savedState.zoom, 976 / 2200);
+    });
+
     test('rejected first SVG leaves Fit pending for the next valid render', () => {
         const harness = new WebviewHarness();
         harness.message({type: 'render', version: 1, svg: '<parsererror'});
@@ -182,6 +200,20 @@ suite('Graphical View viewport', () => {
         assert.ok(Math.abs(Number(line.savedState.zoom) - Math.exp(0.2)) < 0.000001);
     });
 
+    test('modifier wheel completes through the timeout fallback when an animation frame is throttled', () => {
+        const harness = new WebviewHarness(initializedState(1, 300, 200));
+        harness.render(1, 2000, 1200);
+        harness.flushFrame();
+
+        harness.wheel(wheelEvent(-100, () => undefined));
+        assert.equal(harness.savedState.zoom, 1);
+        harness.flushTimeout();
+
+        assert.ok(Number(harness.savedState.zoom) > 1);
+        harness.flushFrame();
+        assert.equal(harness.savedState.zoom, Math.exp(0.2));
+    });
+
     test('toolbar zoom and Reset preserve the viewport-center content point; Fit is distinct', () => {
         const harness = new WebviewHarness(initializedState(1, 500, 300));
         harness.render(1, 2000, 1400);
@@ -282,6 +314,7 @@ class WebviewHarness {
     readonly window = new FakeElement();
     readonly posted: unknown[] = [];
     readonly frames: Array<() => void> = [];
+    readonly timeouts: Array<() => void> = [];
     savedState: Record<string, unknown> = {};
     setStateCalls = 0;
     svg?: FakeSvg;
@@ -329,7 +362,10 @@ class WebviewHarness {
                 this.frames.push(callback);
                 return this.frames.length;
             },
-            setTimeout: () => 0,
+            setTimeout: (callback: () => void) => {
+                this.timeouts.push(callback);
+                return this.timeouts.length;
+            },
             clearTimeout: () => undefined,
             Number,
             Object,
@@ -364,6 +400,13 @@ class WebviewHarness {
 
     flushFrame(): void {
         const callbacks = this.frames.splice(0);
+        for (const callback of callbacks) {
+            callback();
+        }
+    }
+
+    flushTimeout(): void {
+        const callbacks = this.timeouts.splice(0);
         for (const callback of callbacks) {
             callback();
         }
@@ -407,8 +450,8 @@ class FakeElement {
 }
 
 class FakeViewport extends FakeElement {
-    readonly clientWidth = 1000;
-    readonly clientHeight = 800;
+    clientWidth = 1000;
+    clientHeight = 800;
     currentSvg: () => FakeSvg | undefined = () => undefined;
     private left = 0;
     private top = 0;

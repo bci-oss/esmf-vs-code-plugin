@@ -154,10 +154,14 @@
         updateZoomLabel();
     }
 
-    function restoreViewport(version) {
+    function restoreViewport(version, fitMeasurement) {
         viewportLayoutPending = true;
         pendingAnchorCorrection = null;
         afterLayout(version, () => {
+            if (fitMeasurement && (fitMeasurement.width !== viewport.clientWidth || fitMeasurement.height !== viewport.clientHeight)) {
+                applyFit(version);
+                return;
+            }
             const maximumLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
             const maximumTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
             viewport.scrollLeft = Math.min(state.scrollLeft, maximumLeft);
@@ -241,6 +245,10 @@
             return;
         }
         cancelPendingWheel();
+        applyFit(currentVersion);
+    }
+
+    function applyFit(version) {
         const availableWidth = Math.max(1, viewport.clientWidth - VIEWPORT_PADDING);
         const availableHeight = Math.max(1, viewport.clientHeight - VIEWPORT_PADDING);
         state = {
@@ -250,7 +258,7 @@
             scrollTop: 0,
         };
         applyZoom();
-        restoreViewport(currentVersion);
+        restoreViewport(version, {width: viewport.clientWidth, height: viewport.clientHeight});
     }
 
     function normalizeWheelDelta(event) {
@@ -284,7 +292,12 @@
             return;
         }
         const generation = ++wheelGeneration;
-        wheelFrame = requestAnimationFrame(() => {
+        let completed = false;
+        const completeWheel = () => {
+            if (completed) {
+                return;
+            }
+            completed = true;
             if (generation !== wheelGeneration) {
                 return;
             }
@@ -297,7 +310,9 @@
                 return;
             }
             zoomAround(state.zoom * Math.exp(-accumulatedDelta * WHEEL_ZOOM_SENSITIVITY), anchor);
-        });
+        };
+        wheelFrame = requestAnimationFrame(completeWheel);
+        setTimeout(completeWheel, 100);
     }
 
     function cancelPendingWheel() {
@@ -358,16 +373,7 @@
                 applyZoom();
                 restoreViewport(currentVersion);
             } else {
-                const availableWidth = Math.max(1, viewport.clientWidth - VIEWPORT_PADDING);
-                const availableHeight = Math.max(1, viewport.clientHeight - VIEWPORT_PADDING);
-                state = {
-                    ...state,
-                    zoom: clamp(Math.min(availableWidth / baseWidth, availableHeight / baseHeight), MIN_ZOOM, MAX_ZOOM),
-                    scrollLeft: 0,
-                    scrollTop: 0,
-                };
-                applyZoom();
-                restoreViewport(currentVersion);
+                applyFit(currentVersion);
             }
         } catch (error) {
             updateStatus({

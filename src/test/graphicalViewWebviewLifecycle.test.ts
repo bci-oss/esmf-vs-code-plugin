@@ -236,7 +236,13 @@ function instrumentShell(shell: string): string {
     const bootstrap = `<script nonce="${nonce}">globalThis.__gvTestApi=acquireVsCodeApi();globalThis.acquireVsCodeApi=()=>globalThis.__gvTestApi;</script>`;
     const probeScript = `<script nonce="${nonce}">
 const testApi=globalThis.__gvTestApi;
-const nextFrames=(count,callback)=>count<=0?callback():requestAnimationFrame(()=>nextFrames(count-1,callback));
+const afterFrame=callback=>{
+  let completed=false;
+  const complete=()=>{if(completed)return;completed=true;callback();};
+  requestAnimationFrame(complete);
+  setTimeout(complete,100);
+};
+const nextFrames=(count,callback)=>count<=0?callback():afterFrame(()=>nextFrames(count-1,callback));
 const measure=()=>{
   const viewport=document.querySelector('#viewport');
   const svg=document.querySelector('#diagram svg');
