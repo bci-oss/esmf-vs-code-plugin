@@ -17,6 +17,11 @@
     const MIN_ZOOM = 0.25;
     const MAX_ZOOM = 4;
     const ZOOM_FACTOR = 1.2;
+    const VIEWPORT_PADDING = 24;
+    const WHEEL_LINE_PIXELS = 16;
+    const MAX_WHEEL_DELTA = 100;
+    const WHEEL_ZOOM_SENSITIVITY = 0.002;
+    const WHEEL_GESTURE_IDLE_MS = 160;
     const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
     const MARKER_PATTERN = /^gv-(?:header|attribute)-[a-z0-9]{16,32}$/;
     const POSITIVE_DIMENSION_PATTERN = /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?(?:pt)?$/;
@@ -31,18 +36,38 @@
     let currentSvg = null;
     let baseWidth = 0;
     let baseHeight = 0;
-    let restoreGeneration = 0;
+    let layoutGeneration = 0;
+    let wheelFrame = null;
+    let pendingWheelDelta = 0;
+    let pendingWheelAnchor = null;
+    let wheelGeneration = 0;
+    let wheelGestureAnchor = null;
+    let wheelGestureTimeout = null;
+    let pendingRenderedVersion = null;
+    let pendingViewportInitialization = false;
+    let viewportLayoutPending = false;
+    let pendingAnchorCorrection = null;
     let state = normalizeState(vscode.getState());
 
     function normalizeState(candidate) {
         if (!candidate || candidate.schemaVersion !== 1) {
-            return {schemaVersion: 1, zoom: 1, scrollLeft: 0, scrollTop: 0};
+            return {schemaVersion: 1, zoom: 1, scrollLeft: 0, scrollTop: 0, viewportInitialized: false};
         }
+        const legacyStateIsValid =
+            !Object.hasOwn(candidate, 'viewportInitialized') &&
+            Number.isFinite(candidate.zoom) &&
+            candidate.zoom >= MIN_ZOOM &&
+            candidate.zoom <= MAX_ZOOM &&
+            Number.isFinite(candidate.scrollLeft) &&
+            candidate.scrollLeft >= 0 &&
+            Number.isFinite(candidate.scrollTop) &&
+            candidate.scrollTop >= 0;
         return {
             schemaVersion: 1,
             zoom: Number.isFinite(candidate.zoom) ? clamp(candidate.zoom, MIN_ZOOM, MAX_ZOOM) : 1,
             scrollLeft: Number.isFinite(candidate.scrollLeft) ? Math.max(0, candidate.scrollLeft) : 0,
             scrollTop: Number.isFinite(candidate.scrollTop) ? Math.max(0, candidate.scrollTop) : 0,
+            viewportInitialized: typeof candidate.viewportInitialized === 'boolean' ? candidate.viewportInitialized : legacyStateIsValid,
         };
     }
 
@@ -56,6 +81,7 @@
             zoom: state.zoom,
             scrollLeft: Math.max(0, viewport.scrollLeft),
             scrollTop: Math.max(0, viewport.scrollTop),
+            viewportInitialized: state.viewportInitialized,
         };
         vscode.setState(state);
         updateZoomLabel();
@@ -128,51 +154,167 @@
         updateZoomLabel();
     }
 
-    function restoreViewport(version, notifyRendered) {
-        const generation = ++restoreGeneration;
-        afterLayout(() => {
-            if (generation !== restoreGeneration || version !== currentVersion) {
-                return;
-            }
+    function restoreViewport(version) {
+        viewportLayoutPending = true;
+        pendingAnchorCorrection = null;
+        afterLayout(version, () => {
             const maximumLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
             const maximumTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
             viewport.scrollLeft = Math.min(state.scrollLeft, maximumLeft);
             viewport.scrollTop = Math.min(state.scrollTop, maximumTop);
-            persistState();
-            if (notifyRendered) {
-                vscode.postMessage({type: 'rendered', version});
-            }
+            viewportLayoutPending = false;
+            completeLayout(version);
         });
     }
 
-    function afterLayout(callback) {
+    function completeLayout(version) {
+        if (pendingRenderedVersion === version && pendingViewportInitialization) {
+            state = {...state, viewportInitialized: true};
+        }
+        persistState();
+        if (pendingRenderedVersion === version) {
+            pendingRenderedVersion = null;
+            pendingViewportInitialization = false;
+            vscode.postMessage({type: 'rendered', version});
+        }
+    }
+
+    function afterLayout(version, callback) {
+        const generation = ++layoutGeneration;
         let completed = false;
         const complete = () => {
-            if (!completed) {
-                completed = true;
+            if (completed) {
+                return;
+            }
+            completed = true;
+            if (generation === layoutGeneration && version === currentVersion) {
                 callback();
             }
         };
-        requestAnimationFrame(() => requestAnimationFrame(complete));
+        requestAnimationFrame(complete);
         setTimeout(complete, 100);
     }
 
-    function setZoom(zoom) {
-        captureViewport();
-        state = {...state, zoom: clamp(zoom, MIN_ZOOM, MAX_ZOOM)};
+    function viewportCenter() {
+        const bounds = viewport.getBoundingClientRect();
+        return {clientX: bounds.left + viewport.clientWidth / 2, clientY: bounds.top + viewport.clientHeight / 2};
+    }
+
+    function zoomAround(zoom, anchor) {
+        if (!currentSvg) {
+            return false;
+        }
+        const nextZoom = clamp(zoom, MIN_ZOOM, MAX_ZOOM);
+        if (nextZoom === state.zoom) {
+            return false;
+        }
+        const version = currentVersion;
+        applyPendingAnchorCorrection(version);
+        layoutGeneration++;
+        const svgBounds = currentSvg.getBoundingClientRect();
+        const anchorRatioX = svgBounds.width > 0 ? (anchor.clientX - svgBounds.left) / svgBounds.width : 0;
+        const anchorRatioY = svgBounds.height > 0 ? (anchor.clientY - svgBounds.top) / svgBounds.height : 0;
+        state = {...state, zoom: nextZoom};
         applyZoom();
-        restoreViewport(currentVersion, false);
+        viewportLayoutPending = true;
+        pendingAnchorCorrection = {version, anchor, anchorRatioX, anchorRatioY};
+        applyPendingAnchorCorrection(version);
+        completeLayout(version);
+        return true;
+    }
+
+    function applyPendingAnchorCorrection(version) {
+        const correction = pendingAnchorCorrection;
+        if (!correction || correction.version !== version || version !== currentVersion || !currentSvg) {
+            return;
+        }
+        const updatedBounds = currentSvg.getBoundingClientRect();
+        viewport.scrollLeft += updatedBounds.left + correction.anchorRatioX * updatedBounds.width - correction.anchor.clientX;
+        viewport.scrollTop += updatedBounds.top + correction.anchorRatioY * updatedBounds.height - correction.anchor.clientY;
+        captureViewport();
+        pendingAnchorCorrection = null;
+        viewportLayoutPending = false;
     }
 
     function fitDiagram() {
         if (!currentSvg || baseWidth <= 0 || baseHeight <= 0) {
             return;
         }
-        const availableWidth = Math.max(1, viewport.clientWidth - 24);
-        const availableHeight = Math.max(1, viewport.clientHeight - 24);
-        setZoom(Math.min(availableWidth / baseWidth, availableHeight / baseHeight));
-        state = {...state, scrollLeft: 0, scrollTop: 0};
-        restoreViewport(currentVersion, false);
+        cancelPendingWheel();
+        const availableWidth = Math.max(1, viewport.clientWidth - VIEWPORT_PADDING);
+        const availableHeight = Math.max(1, viewport.clientHeight - VIEWPORT_PADDING);
+        state = {
+            ...state,
+            zoom: clamp(Math.min(availableWidth / baseWidth, availableHeight / baseHeight), MIN_ZOOM, MAX_ZOOM),
+            scrollLeft: 0,
+            scrollTop: 0,
+        };
+        applyZoom();
+        restoreViewport(currentVersion);
+    }
+
+    function normalizeWheelDelta(event) {
+        const unit = event.deltaMode === 1 ? WHEEL_LINE_PIXELS : event.deltaMode === 2 ? Math.max(1, viewport.clientHeight) : 1;
+        return clamp(event.deltaY * unit, -MAX_WHEEL_DELTA, MAX_WHEEL_DELTA);
+    }
+
+    function handleWheel(event) {
+        if (!currentSvg || (!event.ctrlKey && !event.metaKey)) {
+            return;
+        }
+        event.preventDefault();
+        const delta = normalizeWheelDelta(event);
+        const proposedZoom = clamp(state.zoom * Math.exp(-delta * WHEEL_ZOOM_SENSITIVITY), MIN_ZOOM, MAX_ZOOM);
+        if (proposedZoom === state.zoom && pendingWheelDelta === 0) {
+            return;
+        }
+        if (!wheelGestureAnchor) {
+            wheelGestureAnchor = {clientX: event.clientX, clientY: event.clientY};
+        }
+        if (wheelGestureTimeout !== null) {
+            clearTimeout(wheelGestureTimeout);
+        }
+        wheelGestureTimeout = setTimeout(() => {
+            wheelGestureAnchor = null;
+            wheelGestureTimeout = null;
+        }, WHEEL_GESTURE_IDLE_MS);
+        pendingWheelDelta = clamp(pendingWheelDelta + delta, -MAX_WHEEL_DELTA, MAX_WHEEL_DELTA);
+        pendingWheelAnchor = wheelGestureAnchor;
+        if (wheelFrame !== null) {
+            return;
+        }
+        const generation = ++wheelGeneration;
+        wheelFrame = requestAnimationFrame(() => {
+            if (generation !== wheelGeneration) {
+                return;
+            }
+            wheelFrame = null;
+            const accumulatedDelta = pendingWheelDelta;
+            const anchor = pendingWheelAnchor;
+            pendingWheelDelta = 0;
+            pendingWheelAnchor = null;
+            if (!anchor || accumulatedDelta === 0) {
+                return;
+            }
+            zoomAround(state.zoom * Math.exp(-accumulatedDelta * WHEEL_ZOOM_SENSITIVITY), anchor);
+        });
+    }
+
+    function cancelPendingWheel() {
+        wheelGeneration++;
+        if (wheelGestureTimeout !== null) {
+            clearTimeout(wheelGestureTimeout);
+        }
+        wheelFrame = null;
+        pendingWheelDelta = 0;
+        pendingWheelAnchor = null;
+        wheelGestureAnchor = null;
+        wheelGestureTimeout = null;
+    }
+
+    function toolbarZoom(zoom) {
+        cancelPendingWheel();
+        zoomAround(zoom, viewportCenter());
     }
 
     function isExactMessage(message, keys) {
@@ -195,19 +337,38 @@
         }
 
         try {
-            if (currentSvg) {
-                captureViewport();
-            }
             const parsedSvg = parseTrustedSvg(message.svg);
             const size = dimensions(parsedSvg);
+            if (currentSvg) {
+                applyPendingAnchorCorrection(currentVersion);
+                if (!viewportLayoutPending) {
+                    captureViewport();
+                }
+            }
             makeNavigationMarkersInteractive(parsedSvg);
+            cancelPendingWheel();
             diagram.replaceChildren(parsedSvg);
             currentSvg = parsedSvg;
             currentVersion = message.version;
             baseWidth = size.width;
             baseHeight = size.height;
-            applyZoom();
-            restoreViewport(currentVersion, true);
+            pendingRenderedVersion = currentVersion;
+            pendingViewportInitialization = !state.viewportInitialized;
+            if (state.viewportInitialized) {
+                applyZoom();
+                restoreViewport(currentVersion);
+            } else {
+                const availableWidth = Math.max(1, viewport.clientWidth - VIEWPORT_PADDING);
+                const availableHeight = Math.max(1, viewport.clientHeight - VIEWPORT_PADDING);
+                state = {
+                    ...state,
+                    zoom: clamp(Math.min(availableWidth / baseWidth, availableHeight / baseHeight), MIN_ZOOM, MAX_ZOOM),
+                    scrollLeft: 0,
+                    scrollTop: 0,
+                };
+                applyZoom();
+                restoreViewport(currentVersion);
+            }
         } catch (error) {
             updateStatus({
                 kind: 'stale',
@@ -218,6 +379,7 @@
     }
 
     viewport.addEventListener('scroll', persistState, {passive: true});
+    viewport.addEventListener('wheel', handleWheel, {passive: false});
     diagram.addEventListener('click', event => {
         activateNavigationTarget(event.target);
     });
@@ -235,9 +397,10 @@
             if (MARKER_PATTERN.test(group.id)) {
                 group.setAttribute('tabindex', '0');
                 group.setAttribute('role', 'link');
-                group.setAttribute('aria-label', group.id.startsWith('gv-attribute-')
-                    ? 'Navigate to attribute source statement'
-                    : 'Navigate to element definition');
+                group.setAttribute(
+                    'aria-label',
+                    group.id.startsWith('gv-attribute-') ? 'Navigate to attribute source statement' : 'Navigate to element definition',
+                );
             }
         }
     }
@@ -252,9 +415,9 @@
     }
 
     document.querySelector('#refresh').addEventListener('click', () => vscode.postMessage({type: 'refresh'}));
-    document.querySelector('#zoom-in').addEventListener('click', () => setZoom(state.zoom * ZOOM_FACTOR));
-    document.querySelector('#zoom-out').addEventListener('click', () => setZoom(state.zoom / ZOOM_FACTOR));
-    document.querySelector('#zoom-reset').addEventListener('click', () => setZoom(1));
+    document.querySelector('#zoom-in').addEventListener('click', () => toolbarZoom(state.zoom * ZOOM_FACTOR));
+    document.querySelector('#zoom-out').addEventListener('click', () => toolbarZoom(state.zoom / ZOOM_FACTOR));
+    document.querySelector('#zoom-reset').addEventListener('click', () => toolbarZoom(1));
     document.querySelector('#zoom-fit').addEventListener('click', fitDiagram);
 
     window.addEventListener('message', event => {

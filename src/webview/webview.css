@@ -12,8 +12,8 @@
  */
 
 @font-face {
-    font-family: "Roboto Condensed";
-    src: url("./RobotoCondensed-Regular.ttf") format("truetype");
+    font-family: 'Roboto Condensed';
+    src: url('./RobotoCondensed-Regular.ttf') format('truetype');
     font-style: normal;
     font-weight: 400;
 }
@@ -135,11 +135,11 @@ body {
     border-radius: 50%;
 }
 
-#status[data-kind="ready"] #status-indicator {
+#status[data-kind='ready'] #status-indicator {
     background: var(--vscode-testing-iconPassed, var(--vscode-foreground));
 }
 
-#status[data-kind="loading"] #status-indicator {
+#status[data-kind='loading'] #status-indicator {
     width: 0.8rem;
     height: 0.8rem;
     border: 2px solid var(--vscode-panel-border);
@@ -147,9 +147,9 @@ body {
     animation: status-spin 0.8s linear infinite;
 }
 
-#status[data-kind="stale"],
-#status[data-kind="unsupported"],
-#status[data-kind="disconnected"] {
+#status[data-kind='stale'],
+#status[data-kind='unsupported'],
+#status[data-kind='disconnected'] {
     flex: 1 0 100%;
     order: 2;
     box-sizing: border-box;
@@ -161,32 +161,32 @@ body {
     border-left-width: 3px;
 }
 
-#status[data-kind="stale"] #status-indicator,
-#status[data-kind="unsupported"] #status-indicator,
-#status[data-kind="disconnected"] #status-indicator {
+#status[data-kind='stale'] #status-indicator,
+#status[data-kind='unsupported'] #status-indicator,
+#status[data-kind='disconnected'] #status-indicator {
     width: auto;
     height: auto;
     border-radius: 0;
 }
 
-#status[data-kind="stale"],
-#status[data-kind="unsupported"] {
+#status[data-kind='stale'],
+#status[data-kind='unsupported'] {
     border-left-color: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-foreground));
 }
 
-#status[data-kind="stale"] #status-indicator::before,
-#status[data-kind="unsupported"] #status-indicator::before {
+#status[data-kind='stale'] #status-indicator::before,
+#status[data-kind='unsupported'] #status-indicator::before {
     color: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-foreground));
-    content: "⚠";
+    content: '⚠';
 }
 
-#status[data-kind="disconnected"] {
+#status[data-kind='disconnected'] {
     border-left-color: var(--vscode-notificationsErrorIcon-foreground, var(--vscode-foreground));
 }
 
-#status[data-kind="disconnected"] #status-indicator::before {
+#status[data-kind='disconnected'] #status-indicator::before {
     color: var(--vscode-notificationsErrorIcon-foreground, var(--vscode-foreground));
-    content: "×";
+    content: '×';
     font-weight: 700;
 }
 
@@ -202,7 +202,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    #status[data-kind="loading"] #status-indicator {
+    #status[data-kind='loading'] #status-indicator {
         animation: none;
     }
 }
@@ -213,8 +213,8 @@ body {
         justify-content: space-between;
     }
 
-    #status[data-kind="ready"],
-    #status[data-kind="loading"] {
+    #status[data-kind='ready'],
+    #status[data-kind='loading'] {
         flex: 1 1 100%;
         max-width: none;
         margin-left: 0;
@@ -230,23 +230,33 @@ body {
     padding: 0.75rem;
 }
 
-#diagram svg {
-    display: block;
+#diagram {
+    display: flex;
+    box-sizing: border-box;
+    width: max-content;
+    min-width: 100%;
+    min-height: 100%;
 }
 
-#diagram svg g[id^="gv-header-"],
-#diagram svg g[id^="gv-attribute-"] {
+#diagram svg {
+    display: block;
+    flex: none;
+    margin: auto;
+}
+
+#diagram svg g[id^='gv-header-'],
+#diagram svg g[id^='gv-attribute-'] {
     cursor: pointer;
     pointer-events: all;
 }
 
-#diagram svg g[id^="gv-header-"]:hover,
-#diagram svg g[id^="gv-attribute-"]:hover {
+#diagram svg g[id^='gv-header-']:hover,
+#diagram svg g[id^='gv-attribute-']:hover {
     filter: brightness(0.94);
 }
 
-#diagram svg g[id^="gv-header-"]:focus-visible,
-#diagram svg g[id^="gv-attribute-"]:focus-visible {
+#diagram svg g[id^='gv-header-']:focus-visible,
+#diagram svg g[id^='gv-attribute-']:focus-visible {
     outline: 2px solid var(--vscode-focusBorder);
     outline-offset: 2px;
 }

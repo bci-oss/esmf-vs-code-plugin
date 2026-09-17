@@ -90,7 +90,7 @@ suite('GraphicalView secure panel contract', () => {
         const stylesheet = readFileSync(join(__dirname, '..', '..', 'src', 'webview', 'webview.css'), 'utf8');
 
         for (const kind of ['ready', 'loading', 'stale', 'unsupported', 'disconnected']) {
-            assert.ok(stylesheet.includes(`#status[data-kind="${kind}"]`));
+            assert.match(stylesheet, new RegExp(`#status\\[data-kind=['"]${kind}['"]\\]`));
         }
         for (const themeVariable of [
             '--vscode-testing-iconPassed',
@@ -103,8 +103,8 @@ suite('GraphicalView secure panel contract', () => {
             assert.ok(stylesheet.includes(themeVariable));
         }
         assert.match(stylesheet, /#toolbar\s*{[^}]*flex-wrap: wrap;/s);
-        assert.match(stylesheet, /#status\[data-kind="loading"\] #status-indicator\s*{[^}]*animation: status-spin/s);
-        assert.match(stylesheet, /#status\[data-kind="stale"\],[\s\S]*flex: 1 0 100%;/);
+        assert.match(stylesheet, /#status\[data-kind=['"]loading['"]\] #status-indicator\s*{[^}]*animation: status-spin/s);
+        assert.match(stylesheet, /#status\[data-kind=['"]stale['"]\],[\s\S]*flex: 1 0 100%;/);
         assert.match(stylesheet, /@media \(max-width: 520px\)/);
     });
 
@@ -117,10 +117,11 @@ suite('GraphicalView secure panel contract', () => {
             version: 1,
             reason: 'xmlParsingFailed',
         });
-        assert.deepEqual(
-            parseGraphicalViewPanelMessage({type: 'navigate', version: 2, targetId: 'gv-attribute-aaaaaaaaaaaaaaaa'}),
-            {type: 'navigate', version: 2, targetId: 'gv-attribute-aaaaaaaaaaaaaaaa'},
-        );
+        assert.deepEqual(parseGraphicalViewPanelMessage({type: 'navigate', version: 2, targetId: 'gv-attribute-aaaaaaaaaaaaaaaa'}), {
+            type: 'navigate',
+            version: 2,
+            targetId: 'gv-attribute-aaaaaaaaaaaaaaaa',
+        });
         for (const message of [
             {type: 'ready', extra: true},
             {type: 'navigate', version: 2, targetId: 'bad'},
@@ -160,6 +161,7 @@ suite('GraphicalView secure panel contract', () => {
         assert.ok(controllerSource.includes('schemaVersion: 1'));
         assert.ok(controllerSource.includes('scrollLeft'));
         assert.ok(controllerSource.includes('scrollTop'));
+        assert.ok(controllerSource.includes('viewportInitialized'));
         assert.equal(/setState\([^)]*(?:svg|uri|target|command)/i.test(controllerSource), false);
         assert.ok(controllerSource.includes("event.key !== 'Enter' && event.key !== ' '"));
         assert.ok(controllerSource.includes("vscode.postMessage({type: 'navigate', version: currentVersion, targetId: group.id})"));

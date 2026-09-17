@@ -83,7 +83,13 @@ suite('Graphical View webview controller', () => {
             {type: 'navigate', version: 4, targetId: markerId},
         ]);
         assert.equal(prevented, 2);
-        assert.deepEqual(JSON.parse(JSON.stringify(state.value)), {schemaVersion: 1, zoom: 1, scrollLeft: 0, scrollTop: 0});
+        assert.deepEqual(JSON.parse(JSON.stringify(state.value)), {
+            schemaVersion: 1,
+            zoom: 0.44363636363636366,
+            scrollLeft: 0,
+            scrollTop: 0,
+            viewportInitialized: true,
+        });
     });
 
     test('applies only allow-listed status kinds and preserves complete status text safely', () => {
