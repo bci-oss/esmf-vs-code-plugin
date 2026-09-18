@@ -33,19 +33,20 @@ let sammCliDownloader: SammCliDownloader;
 let gitHubRepositoryValidator: GitHubRepositoryValidator;
 
 let outputChannel: ExtensionLogger;
+let logOutputChannel: vscode.LogOutputChannel;
 let context: vscode.ExtensionContext;
 let restartChain: Promise<void> = Promise.resolve();
 let githubRepositoryValidationTimeout: ReturnType<typeof setTimeout> | undefined;
 
 export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     context = ctx;
-    const logOutputChannel = vscode.window.createOutputChannel('RDF/Turtle and SAMM Aspect Models Language Server', { log: true });
+    logOutputChannel = vscode.window.createOutputChannel('Semantic Models', { log: true });
     context.subscriptions.push(logOutputChannel);
     outputChannel = logOutputChannel;
     settings = new TurtleExtensionSettings();
     sammCliDownloader = new SammCliDownloader(context, settings, outputChannel);
     gitHubRepositoryValidator = new GitHubRepositoryValidator(outputChannel);
-    languageClient = new TurtleLanguageClient(outputChannel, settings.getSammCliLspServerPort(), settings.getLanguageClientTraceLevel());
+    languageClient = new TurtleLanguageClient(outputChannel, settings.getSammCliLspServerPort(), logOutputChannel.logLevel);
     aspectValidationController = new AspectValidationController(createUnavailableClient(), vscode.window, vscode.workspace, outputChannel);
     aspectValidationController.register(context);
 
@@ -64,6 +65,9 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     );
 
     context.subscriptions.push(
+        logOutputChannel.onDidChangeLogLevel(() => {
+            void queueLanguageServicesRestart('Log level changed');
+        }),
         vscode.commands.registerCommand(SELECT_EXECUTABLE_COMMAND, async () => {
             await selectSammCliExecutable();
         }),
@@ -136,7 +140,7 @@ function queueLanguageServicesRestart(reason: string): Promise<void> {
 
 async function startLanguageServer(): Promise<void> {
     const executablePath = settings.getSammCliPath();
-    languageServer = new TurtleLanguageServer(context, outputChannel, executablePath, settings.getSammCliLspServerPort());
+    languageServer = new TurtleLanguageServer(context, outputChannel, executablePath, settings.getSammCliLspServerPort(), settings.getSammCliLspAdditionalStartupOptions(), logOutputChannel.logLevel);
     await languageServer.start();
 }
 
@@ -169,7 +173,7 @@ async function restartLanguageServices(reason: string): Promise<void> {
         throw error;
     }
 
-    const nextClient = new TurtleLanguageClient(outputChannel, settings.getSammCliLspServerPort(), settings.getLanguageClientTraceLevel());
+    const nextClient = new TurtleLanguageClient(outputChannel, settings.getSammCliLspServerPort(), logOutputChannel.logLevel);
     await nextClient.connect();
     languageClient = nextClient;
     aspectValidationController.setClient(nextClient);
