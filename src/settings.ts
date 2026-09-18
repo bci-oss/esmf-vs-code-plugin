@@ -47,8 +47,8 @@ export class TurtleExtensionSettings {
         return vscode.workspace.getConfiguration('semantic-models.languageServerSettings').get<number>('serverPort', 1846);
     }
 
-    getLanguageClientTraceLevel(): 'off' | 'messages' | 'verbose' {
-        return vscode.workspace.getConfiguration('semantic-models.languageServerSettings').get<'off' | 'messages' | 'verbose'>('traceLevel', 'off');
+    getSammCliLspAdditionalStartupOptions(): string {
+        return vscode.workspace.getConfiguration('semantic-models.languageServerSettings').get<string>('additionalStartupOptions', '');
     }
 
     getGithubRepositories(): Array<GithubRepositoryConfig> {
