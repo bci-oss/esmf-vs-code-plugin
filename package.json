@@ -94,20 +94,10 @@
           "description": "TCP port used to connect to the SAMM language server.",
           "order": 3
         },
-        "semantic-models.languageServerSettings.traceLevel": {
+        "semantic-models.languageServerSettings.additionalStartupOptions": {
           "type": "string",
-          "enum": [
-            "off",
-            "messages",
-            "verbose"
-          ],
-          "enumDescriptions": [
-            "No tracing.",
-            "Log request/response message names.",
-            "Log full message contents."
-          ],
-          "default": "off",
-          "description": "Controls the verbosity of Language Server Protocol (LSP) tracing in the output channel.",
+          "default": "",
+          "description": "Additional comma-separated command-line options (e.g. -Dkey=value, -Dkey2=value2) to pass when starting the language server.",
           "order": 4
         },
         "semantic-models.modelResolution.githubRepositories": {

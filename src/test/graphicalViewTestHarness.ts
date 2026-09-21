@@ -351,6 +351,9 @@ class FakeOutputChannel implements ExtensionLogger {
     trace(message: string): void {
         this.lines.push(`[trace] ${message}`);
     }
+    debug(message: string): void {
+        this.lines.push(`[debug] ${message}`);
+    }
     info(message: string): void {
         this.lines.push(`[info] ${message}`);
     }

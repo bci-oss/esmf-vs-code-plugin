@@ -17,8 +17,8 @@ features *Go to Definition* for elements and semantic model validation.
   - Path to the SAMM CLI executable or JAR file to use as the language server. Can be downloaded or selected using the 'Select SAMM CLI Executable' command.
 - `semantic-models.languageServerSettings.serverPort` (number, default: `1846`)
   - TCP port used to connect to the SAMM language server.
-- `semantic-models.languageServerSettings.traceLevel` (string, default: `off`)
-  - Controls the verbosity of Language Server Protocol (LSP) tracing. Options: `off`, `messages`, `verbose`.
+- `semantic-models.languageServerSettings.additionalStartupOptions` (string, default: `""`)
+  - Additional comma-separated command-line options (e.g. `-Dkey=value`, `-Dkey2=value2`) to pass when starting the language server.
 - `semantic-models.modelResolution.githubRepositories` (array, default: `[]`)
   - Additional GitHub repositories to use for Aspect Model Resolution (e.g. `Go to Definition` and validation of models referencing Aspect Models hosted in other repositories). Each entry supports:
     - `repository` (string, required) - repository in the format `owner/repository`, e.g. `eclipse-esmf/esmf-sdk`.
