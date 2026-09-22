@@ -44,7 +44,7 @@ export class TurtleLanguageClient implements RequestClient {
     constructor(
         private outputChannel: ExtensionLogger,
         private readonly serverPort: number,
-        private readonly traceLevel: 'off' | 'messages' | 'verbose' = 'off',
+        private readonly logLevel: vscode.LogLevel
     ) {
         this.client = this.initLanguageClient(this.serverPort);
     }
@@ -54,14 +54,12 @@ export class TurtleLanguageClient implements RequestClient {
         return {dispose: () => this.closeListeners.delete(listener)};
     }
 
-    private toTrace(level: 'off' | 'messages' | 'verbose'): Trace {
+    private toTrace(level: vscode.LogLevel): Trace {
         switch (level) {
-            case 'messages':
-                return Trace.Messages;
-            case 'verbose':
-                return Trace.Verbose;
-            default:
-                return Trace.Off;
+            case vscode.LogLevel.Trace: return Trace.Verbose;
+            case vscode.LogLevel.Debug: return Trace.Compact;
+            case vscode.LogLevel.Info: return Trace.Messages;
+            default: return Trace.Off;
         }
     }
 
@@ -93,7 +91,7 @@ export class TurtleLanguageClient implements RequestClient {
         };
 
         const client = new LanguageClient('RDF/Turtle and SAMM Aspect Models Language Client', serverOptions, clientOptions);
-        client.setTrace(this.toTrace(this.traceLevel));
+        client.setTrace(this.toTrace(this.logLevel));
         return client;
     }
 
@@ -118,7 +116,7 @@ export class TurtleLanguageClient implements RequestClient {
             // Prevent an unhandled-rejection warning if start() rejects after
             // the timeout already won the race.
             startPromise.catch(() => undefined);
-            await this.client.stop().catch(() => undefined);
+            await this.disconnect().catch(() => undefined);
             const message = error instanceof Error ? error.message : 'An unknown error occurred while starting the language client.';
             this.outputChannel.error(`Failed to start language client: ${message}`);
             throw error;
@@ -131,15 +129,17 @@ export class TurtleLanguageClient implements RequestClient {
 
     async disconnect(): Promise<void> {
         this.disconnecting = true;
-        if (this.client.state === State.Stopped) {
-            return;
-        }
-
-        await this.client.stop().catch(error => {
+        try {
+            if (this.client.state !== State.Stopped) {
+                await this.client.stop();
+            }
+        } catch (error) {
             if (this.client.state !== State.Stopped) {
                 throw error;
             }
-        });
+        } finally {
+            this.client.diagnostics?.dispose();
+        }
     }
 
     sendRequest<R>(method: string, params?: unknown): Promise<R> {

@@ -32,6 +32,8 @@ export class TurtleLanguageServer {
         private readonly outputChannel: ExtensionLogger,
         private readonly sammCliExecutablePath: string,
         private readonly serverPort: number,
+        private readonly additionalStartupOptions: string,
+        private readonly logLevel: vscode.LogLevel,
     ) {}
 
     get pid(): number | undefined {
@@ -44,9 +46,11 @@ export class TurtleLanguageServer {
     }
 
     async start(): Promise<void> {
+        const additionalStartupArgs = this.additionalStartupOptions.split(',').map(option => option.trim()).filter(option => option.length > 0);
+        const traceArgs = this.toTraceArgs(this.logLevel);
         const [executable, args] = this.sammCliExecutablePath.endsWith('.jar')
-            ? ['java', [...JAVA_OPTIONS, '-jar', this.sammCliExecutablePath, 'lsp', '--port', String(this.serverPort)]]
-            : [this.sammCliExecutablePath, ['lsp', '--port', String(this.serverPort)]];
+            ? ['java', [...JAVA_OPTIONS, ...additionalStartupArgs, '-jar', this.sammCliExecutablePath, ...traceArgs, 'lsp', '--port', String(this.serverPort)]]
+            : [this.sammCliExecutablePath, [...additionalStartupArgs, ...traceArgs, 'lsp', '--port', String(this.serverPort)]];
 
         this.serverProcess = this.spawnProcess(executable, args);
         this.outputChannel.info(
@@ -60,6 +64,15 @@ export class TurtleLanguageServer {
             throw error;
         }
         this.outputChannel.info('Language server started successfully.');
+    }
+
+    private toTraceArgs(level: vscode.LogLevel): string[] {
+        switch (level) {
+            case vscode.LogLevel.Trace: return ['-vvv'];
+            case vscode.LogLevel.Debug: return ['-vv'];
+            case vscode.LogLevel.Info: return ['-v'];
+            default: return [];
+        }
     }
 
     async stop(): Promise<void> {
@@ -105,11 +118,11 @@ export class TurtleLanguageServer {
         child.stderr.setEncoding('utf8');
 
         child.stdout.on('data', data => {
-            this.outputChannel.trace(String(data).trimEnd());
+            this.handleLogOutput(String(data).trimEnd());
         });
 
         child.stderr.on('data', data => {
-            this.outputChannel.warn(`[server stderr] ${String(data).trimEnd()}`);
+            this.handleLogOutput(String(data).trimEnd());
         });
 
         child.once('error', error => {
@@ -129,6 +142,27 @@ export class TurtleLanguageServer {
         };
 
         return spawn(executable, args, spawnOptions) as ChildProcessWithoutNullStreams;
+    }
+
+    private handleLogOutput(logMessage: string): void {
+        const level = /\b(INFO|WARN|DEBUG|TRACE|ERROR)\b/.exec(logMessage)?.[1];
+
+        switch (level) {
+            case 'WARN':
+                this.outputChannel.warn(logMessage);
+                break;
+            case 'DEBUG':
+                this.outputChannel.debug(logMessage);
+                break;
+            case 'TRACE':
+                this.outputChannel.trace(logMessage);
+                break;
+            case 'ERROR':
+                this.outputChannel.error(logMessage);
+                break;
+            default:
+                this.outputChannel.info(logMessage);
+        }
     }
 
     protected async waitForServerPort(port: number, process: ChildProcessWithoutNullStreams): Promise<void> {

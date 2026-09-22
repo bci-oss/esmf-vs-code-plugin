@@ -140,6 +140,9 @@ function createFakeOutputChannel(): FakeOutputChannel {
         trace(message: string) {
             this.lines.push(`[trace] ${message}`);
         },
+        debug(message: string) {
+            this.lines.push(`[debug] ${message}`);
+        },
         info(message: string) {
             this.lines.push(`[info] ${message}`);
         },

@@ -39,7 +39,7 @@ let githubRepositoryValidationTimeout: ReturnType<typeof setTimeout> | undefined
 
 export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     context = ctx;
-    logOutputChannel = vscode.window.createOutputChannel('RDF/Turtle and SAMM Aspect Models Language Server', {log: true});
+    logOutputChannel = vscode.window.createOutputChannel('Semantic Models', { log: true });
     context.subscriptions.push(logOutputChannel);
     outputChannel = logOutputChannel;
     settings = new TurtleExtensionSettings();
@@ -64,6 +64,9 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     );
 
     context.subscriptions.push(
+        logOutputChannel.onDidChangeLogLevel(() => {
+            void languageServicesSupervisor.restart('Log level changed');
+        }),
         vscode.commands.registerCommand(SELECT_EXECUTABLE_COMMAND, async () => {
             await selectSammCliExecutable();
         }),
@@ -125,8 +128,15 @@ function createLanguageServicesSupervisor(): LanguageServicesSupervisor {
             mode: settings.isEmbeddedLanguageServerStartEnabled() ? 'embedded' : 'external',
             port: settings.getSammCliLspServerPort(),
         }),
-        createServer: configuration => new TurtleLanguageServer(context, outputChannel, settings.getSammCliPath(), configuration.port),
-        createClient: configuration => new TurtleLanguageClient(outputChannel, configuration.port, settings.getLanguageClientTraceLevel()),
+        createServer: configuration => new TurtleLanguageServer(
+            context,
+            outputChannel,
+            settings.getSammCliPath(),
+            configuration.port,
+            settings.getSammCliLspAdditionalStartupOptions(),
+            logOutputChannel.logLevel,
+        ),
+        createClient: configuration => new TurtleLanguageClient(outputChannel, configuration.port, logOutputChannel.logLevel),
         setRequestClient: (client, generation) => aspectValidationController.setClient(client, generation),
         unavailableClient: createUnavailableClient,
         logger: outputChannel,

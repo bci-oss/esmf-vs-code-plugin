@@ -134,6 +134,7 @@ function createHarness(mode: 'embedded' | 'external' = 'embedded', clientFailure
     let clientIndex = 0;
     const logger: ExtensionLogger = {
         trace: message => logs.push(message),
+        debug: message => logs.push(message),
         info: message => logs.push(message),
         warn: message => logs.push(message),
         error: message => logs.push(String(message)),
