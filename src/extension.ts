@@ -12,13 +12,14 @@
  */
 
 import * as vscode from 'vscode';
-import { AspectValidationController, RequestClient } from './aspectValidation';
-import { TurtleLanguageServer } from './languageServer';
-import { SammCliDownloader } from './sammCliDownloader';
-import { TurtleExtensionSettings } from './settings';
-import { TurtleLanguageClient } from './languageClient';
-import { GitHubRepositoryValidator } from './githubRepositoryValidator';
-import type { ExtensionLogger } from './outputChannel';
+import {AspectValidationController, RequestClient} from './aspectValidation';
+import {TurtleLanguageServer} from './languageServer';
+import {SammCliDownloader} from './sammCliDownloader';
+import {TurtleExtensionSettings} from './settings';
+import {TurtleLanguageClient} from './languageClient';
+import {GitHubRepositoryValidator} from './githubRepositoryValidator';
+import type {ExtensionLogger} from './outputChannel';
+import {LanguageServicesSupervisor, LanguageServicesMode, TerminalAction} from './languageServicesSupervisor';
 
 const SELECT_EXECUTABLE_COMMAND = 'semantic-models.selectSammCliExecutable';
 const SELECT_EXECUTABLE_TITLE = 'Select SAMM CLI Executable';
@@ -26,8 +27,6 @@ const RESTART_LANGUAGE_SERVICES_COMMAND = 'semantic-models.restartLanguageServic
 const GITHUB_REPOSITORY_VALIDATION_DEBOUNCE_MS = 2000;
 
 let settings: TurtleExtensionSettings;
-let languageServer: TurtleLanguageServer | undefined;
-let languageClient: TurtleLanguageClient;
 let aspectValidationController: AspectValidationController;
 let sammCliDownloader: SammCliDownloader;
 let gitHubRepositoryValidator: GitHubRepositoryValidator;
@@ -35,7 +34,7 @@ let gitHubRepositoryValidator: GitHubRepositoryValidator;
 let outputChannel: ExtensionLogger;
 let logOutputChannel: vscode.LogOutputChannel;
 let context: vscode.ExtensionContext;
-let restartChain: Promise<void> = Promise.resolve();
+let languageServicesSupervisor: LanguageServicesSupervisor;
 let githubRepositoryValidationTimeout: ReturnType<typeof setTimeout> | undefined;
 
 export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
@@ -46,9 +45,9 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     settings = new TurtleExtensionSettings();
     sammCliDownloader = new SammCliDownloader(context, settings, outputChannel);
     gitHubRepositoryValidator = new GitHubRepositoryValidator(outputChannel);
-    languageClient = new TurtleLanguageClient(outputChannel, settings.getSammCliLspServerPort(), logOutputChannel.logLevel);
     aspectValidationController = new AspectValidationController(createUnavailableClient(), vscode.window, vscode.workspace, outputChannel);
     aspectValidationController.register(context);
+    languageServicesSupervisor = createLanguageServicesSupervisor();
 
     context.subscriptions.push(
         vscode.languages.setLanguageConfiguration('turtle', {
@@ -57,31 +56,31 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
                     beforeText: /\.\s*$/,
                     action: {
                         indentAction: vscode.IndentAction.Outdent,
-                        appendText: "\n"
+                        appendText: '\n',
                     },
                 },
             ],
-        })
+        }),
     );
 
     context.subscriptions.push(
         logOutputChannel.onDidChangeLogLevel(() => {
-            void queueLanguageServicesRestart('Log level changed');
+            void languageServicesSupervisor.restart('Log level changed');
         }),
         vscode.commands.registerCommand(SELECT_EXECUTABLE_COMMAND, async () => {
             await selectSammCliExecutable();
         }),
         vscode.commands.registerCommand(RESTART_LANGUAGE_SERVICES_COMMAND, async () => {
-            await queueLanguageServicesRestart('Manual restart command');
+            await languageServicesSupervisor.restart('Manual restart command');
         }),
         vscode.workspace.onDidChangeConfiguration((e: vscode.ConfigurationChangeEvent) => {
             if (e.affectsConfiguration('semantic-models.languageServerSettings')) {
-                void queueLanguageServicesRestart('Configuration change detected');
+                void languageServicesSupervisor.restart('Configuration change detected');
             }
             if (e.affectsConfiguration('semantic-models.modelResolution')) {
                 scheduleGithubRepositoryValidation();
             }
-        })
+        }),
     );
 
     void validateConfiguredGithubRepositories();
@@ -97,7 +96,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
         return;
     }
 
-    void queueLanguageServicesRestart('extension activation');
+    void languageServicesSupervisor.start('extension activation');
 
     if (settings.sammCliAutoUpdateIsEnabled() && settings.isEmbeddedLanguageServerStartEnabled()) {
         sammCliDownloader.checkForSammCliUpdates().catch(error => {
@@ -123,60 +122,53 @@ function scheduleGithubRepositoryValidation(): void {
     }, GITHUB_REPOSITORY_VALIDATION_DEBOUNCE_MS);
 }
 
-function queueLanguageServicesRestart(reason: string): Promise<void> {
-    restartChain = restartChain
-        .then(() => restartLanguageServices(reason))
-        .catch(async error => {
-            const selection = await vscode.window.showErrorMessage(`Failed to start required language services: ${error instanceof Error ? error.message : String(error)}`, 'Configure SAMM CLI Executable', 'Check Extension Settings');
-            if (selection === 'Configure SAMM CLI Executable') {
-                void selectSammCliExecutable();
-            } else if (selection === 'Check Extension Settings') {
-                void vscode.commands.executeCommand('workbench.action.openSettings', 'semantic-models.languageServerSettings');
-            }
-        });
-
-    return restartChain;
+function createLanguageServicesSupervisor(): LanguageServicesSupervisor {
+    return new LanguageServicesSupervisor({
+        configuration: () => ({
+            mode: settings.isEmbeddedLanguageServerStartEnabled() ? 'embedded' : 'external',
+            port: settings.getSammCliLspServerPort(),
+        }),
+        createServer: configuration => new TurtleLanguageServer(
+            context,
+            outputChannel,
+            settings.getSammCliPath(),
+            configuration.port,
+            settings.getSammCliLspAdditionalStartupOptions(),
+            logOutputChannel.logLevel,
+        ),
+        createClient: configuration => new TurtleLanguageClient(outputChannel, configuration.port, logOutputChannel.logLevel),
+        setRequestClient: (client, generation) => aspectValidationController.setClient(client, generation),
+        unavailableClient: createUnavailableClient,
+        logger: outputChannel,
+        notifyTerminal: notifyTerminalRecoveryFailure,
+        showOutput: () => logOutputChannel.show(true),
+        showSettings: () => {
+            void vscode.commands.executeCommand('workbench.action.openSettings', 'semantic-models.languageServerSettings');
+        },
+    });
 }
 
-async function startLanguageServer(): Promise<void> {
-    const executablePath = settings.getSammCliPath();
-    languageServer = new TurtleLanguageServer(context, outputChannel, executablePath, settings.getSammCliLspServerPort(), settings.getSammCliLspAdditionalStartupOptions(), logOutputChannel.logLevel);
-    await languageServer.start();
-}
-
-async function stopLanguageServer(): Promise<void> {
-    if (!languageServer) {
-        return;
+async function notifyTerminalRecoveryFailure(mode: LanguageServicesMode): Promise<TerminalAction> {
+    const guidance =
+        mode === 'external'
+            ? 'Start or check the separately managed language server, then retry.'
+            : 'Check the configured SAMM CLI executable and extension settings.';
+    const selection = await vscode.window.showErrorMessage(
+        `The Turtle language server could not be recovered after four attempts. ${guidance}`,
+        'Restart Now',
+        'Show Language Server Output',
+        'Check Extension Settings',
+    );
+    if (selection === 'Restart Now') {
+        return 'restart';
     }
-
-    await languageServer.stop();
-    languageServer = undefined;
-}
-
-async function restartLanguageServices(reason: string): Promise<void> {
-    outputChannel.info(`Restarting language services (${reason}).`);
-
-    aspectValidationController.setClient(createUnavailableClient());
-    await languageClient.disconnect();
-    await stopLanguageServer();
-
-    try {
-        if (!settings.isEmbeddedLanguageServerStartEnabled()) {
-            outputChannel.info('SAMM CLI LSP activation is disabled. Assuming an external server is already running.');
-        } else {
-            await startLanguageServer();
-        }
-    } catch (error) {
-        await stopLanguageServer().catch(() => undefined);
-        aspectValidationController.setClient(createUnavailableClient());
-
-        throw error;
+    if (selection === 'Show Language Server Output') {
+        return 'output';
     }
-
-    const nextClient = new TurtleLanguageClient(outputChannel, settings.getSammCliLspServerPort(), logOutputChannel.logLevel);
-    await nextClient.connect();
-    languageClient = nextClient;
-    aspectValidationController.setClient(nextClient);
+    if (selection === 'Check Extension Settings') {
+        return 'settings';
+    }
+    return undefined;
 }
 
 type SammCliQuickPickItem = vscode.QuickPickItem & {
@@ -255,11 +247,11 @@ async function selectSammCliExecutable(): Promise<void> {
     }
 
     vscode.window.showInformationMessage(restartReason);
-    await queueLanguageServicesRestart(restartReason);
+    await languageServicesSupervisor.restart(restartReason);
 }
 
 async function promptForDownloadType(): Promise<'native' | 'jar' | undefined> {
-    const items: Array<vscode.QuickPickItem & { value: 'native' | 'jar' }> = [
+    const items: Array<vscode.QuickPickItem & {value: 'native' | 'jar'}> = [
         {
             label: '$(file-binary) Native Executable',
             detail: 'Platform-specific binary. No Java required.',
@@ -306,7 +298,5 @@ export async function deactivate(): Promise<void> {
         clearTimeout(githubRepositoryValidationTimeout);
         githubRepositoryValidationTimeout = undefined;
     }
-    await restartChain;
-    await languageClient.disconnect();
-    await stopLanguageServer();
+    await languageServicesSupervisor?.dispose();
 }

@@ -12,7 +12,7 @@
  */
 
 import * as vscode from 'vscode';
-import type { ExtensionLogger } from './outputChannel';
+import type {ExtensionLogger} from './outputChannel';
 
 export const VALIDATE_DOCUMENT_REQUEST = 'turtle/aspectValidation/validateDocument';
 export const VALIDATE_DOCUMENT_COMMAND = 'semantic-models.validateDocumentNow';
@@ -26,12 +26,17 @@ export interface TurtleDiagnostic {
 }
 
 export interface DiagnosticReport {
-    diagnostics: Array<TurtleDiagnostic>
+    diagnostics: Array<TurtleDiagnostic>;
 }
 
 export interface RequestClient {
     sendRequest<R>(method: string, params?: unknown): Thenable<R>;
 }
+
+type RequestClientBinding = {
+    client: RequestClient;
+    generation: number;
+};
 
 export interface ValidationWindow {
     showInformationMessage(message: string): Thenable<unknown>;
@@ -51,15 +56,19 @@ export interface ValidationWorkspace {
 export type ValidationOutputChannel = ExtensionLogger;
 
 export class AspectValidationController {
+    private binding: RequestClientBinding;
+
     constructor(
-        private client: RequestClient,
+        client: RequestClient,
         private readonly window: ValidationWindow,
         private readonly workspace: ValidationWorkspace,
         private readonly outputChannel: ValidationOutputChannel,
-    ) {}
+    ) {
+        this.binding = {client, generation: 0};
+    }
 
-    setClient(client: RequestClient): void {
-        this.client = client;
+    setClient(client: RequestClient, generation = this.binding.generation + 1): void {
+        this.binding = {client, generation};
     }
 
     register(context: vscode.ExtensionContext): void {
@@ -67,6 +76,9 @@ export class AspectValidationController {
             vscode.commands.registerCommand(VALIDATE_DOCUMENT_COMMAND, async () => {
                 const editor = vscode.window.activeTextEditor;
                 await this.validateDocument(editor?.document, 'manual');
+            }),
+            this.workspace.onDidSaveTextDocument(document => {
+                void this.validateDocument(document, 'save');
             }),
         );
     }
@@ -82,27 +94,35 @@ export class AspectValidationController {
             return undefined;
         }
 
+        const binding = this.binding;
         const request = () =>
-            this.client.sendRequest<DiagnosticReport>(VALIDATE_DOCUMENT_REQUEST, {
+            binding.client.sendRequest<DiagnosticReport>(VALIDATE_DOCUMENT_REQUEST, {
                 uri: document.uri.toString(),
                 reason: trigger,
             });
 
-        return this.runValidation(`document:${document.uri.toString()}`, 'Aspect model validation', trigger, request);
+        return this.runValidation('Aspect model validation', trigger, binding, request);
     }
 
     private async runValidation(
-        key: string,
         title: string,
         trigger: AspectValidationTrigger,
+        binding: RequestClientBinding,
         request: () => Thenable<DiagnosticReport>,
     ): Promise<DiagnosticReport | undefined> {
         try {
             const result = await this.runWithProgress(title, trigger, request);
-
+            if (this.binding !== binding) {
+                this.outputChannel.info(`[validation] Ignoring stale result from generation ${binding.generation}.`);
+                return undefined;
+            }
             await this.showSummary(result, trigger);
             return result;
         } catch (error) {
+            if (this.binding !== binding) {
+                this.outputChannel.info(`[validation] Ignoring stale failure from generation ${binding.generation}.`);
+                return undefined;
+            }
             await this.handleFailure(error, trigger);
             return undefined;
         }
@@ -164,7 +184,7 @@ export class AspectValidationController {
         if (violationCount === 0) {
             return 'Aspect validation completed without issues.';
         }
-        return result.diagnostics.map(x => x.message).join(", ");
+        return result.diagnostics.map(x => x.message).join(', ');
     }
 
     private toFailureMessage(error: unknown): string {

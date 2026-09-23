@@ -12,16 +12,20 @@
  */
 
 import * as vscode from 'vscode';
-import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import {ChildProcessWithoutNullStreams, spawn} from 'node:child_process';
 import * as net from 'node:net';
-import type { ExtensionLogger } from './outputChannel';
-import { JAVA_OPTIONS } from './constants';
+import type {ExtensionLogger} from './outputChannel';
+import {JAVA_OPTIONS} from './constants';
+import type {DisposableLike, ServerExitEvent} from './languageServicesSupervisor';
 
 const SERVER_READY_TIMEOUT_MS = 60_000;
 const SERVER_READY_RETRY_DELAY_MS = 250;
 
 export class TurtleLanguageServer {
     private serverProcess: ChildProcessWithoutNullStreams | undefined;
+    private readonly exitListeners = new Set<(event: ServerExitEvent) => void>();
+    private readonly expectedProcesses = new WeakSet<ChildProcessWithoutNullStreams>();
+    private readonly reportedProcesses = new WeakSet<ChildProcessWithoutNullStreams>();
 
     constructor(
         private readonly context: vscode.ExtensionContext,
@@ -29,21 +33,29 @@ export class TurtleLanguageServer {
         private readonly sammCliExecutablePath: string,
         private readonly serverPort: number,
         private readonly additionalStartupOptions: string,
-        private readonly logLevel: vscode.LogLevel
-    ) { }
+        private readonly logLevel: vscode.LogLevel,
+    ) {}
+
+    get pid(): number | undefined {
+        return this.serverProcess?.pid;
+    }
+
+    onExit(listener: (event: ServerExitEvent) => void): DisposableLike {
+        this.exitListeners.add(listener);
+        return {dispose: () => this.exitListeners.delete(listener)};
+    }
 
     async start(): Promise<void> {
-
         const additionalStartupArgs = this.additionalStartupOptions.split(',').map(option => option.trim()).filter(option => option.length > 0);
         const traceArgs = this.toTraceArgs(this.logLevel);
-
         const [executable, args] = this.sammCliExecutablePath.endsWith('.jar')
             ? ['java', [...JAVA_OPTIONS, ...additionalStartupArgs, '-jar', this.sammCliExecutablePath, ...traceArgs, 'lsp', '--port', String(this.serverPort)]]
             : [this.sammCliExecutablePath, [...additionalStartupArgs, ...traceArgs, 'lsp', '--port', String(this.serverPort)]];
 
-        this.outputChannel.info(`Starting language server: ${executable} ${args.join(' ')}`);
-
         this.serverProcess = this.spawnProcess(executable, args);
+        this.outputChannel.info(
+            `[language-server] event=spawned mode=${this.sammCliExecutablePath.endsWith('.jar') ? 'jar' : 'native'} port=${this.serverPort} pid=${String(this.serverProcess.pid)}`,
+        );
 
         try {
             await this.waitForServerPort(this.serverPort, this.serverProcess);
@@ -65,9 +77,13 @@ export class TurtleLanguageServer {
 
     async stop(): Promise<void> {
         const process = this.serverProcess;
+        if (!process) {
+            return;
+        }
+        this.expectedProcesses.add(process);
         this.serverProcess = undefined;
 
-        if (!process) {
+        if (process.exitCode !== null || process.signalCode !== null) {
             return;
         }
 
@@ -96,13 +112,7 @@ export class TurtleLanguageServer {
     }
 
     private spawnProcess(executable: string, args: string[]): ChildProcessWithoutNullStreams {
-        const spawnOptions = {
-            cwd: this.context.extensionPath,
-            env: process.env,
-            stdio: 'pipe' as const,
-        };
-
-        const child = spawn(executable, args, spawnOptions) as ChildProcessWithoutNullStreams;
+        const child = this.createChildProcess(executable, args);
 
         child.stdout.setEncoding('utf8');
         child.stderr.setEncoding('utf8');
@@ -117,9 +127,21 @@ export class TurtleLanguageServer {
 
         child.once('error', error => {
             this.outputChannel.error(`Server process error: ${String(error instanceof Error ? error.message : error)}`);
+            this.reportExit(child, null, null);
         });
+        child.once('exit', (code, signal) => this.reportExit(child, code, signal));
 
         return child;
+    }
+
+    protected createChildProcess(executable: string, args: string[]): ChildProcessWithoutNullStreams {
+        const spawnOptions = {
+            cwd: this.context.extensionPath,
+            env: process.env,
+            stdio: 'pipe' as const,
+        };
+
+        return spawn(executable, args, spawnOptions) as ChildProcessWithoutNullStreams;
     }
 
     private handleLogOutput(logMessage: string): void {
@@ -143,10 +165,13 @@ export class TurtleLanguageServer {
         }
     }
 
-    private async waitForServerPort(port: number, process: ChildProcessWithoutNullStreams): Promise<void> {
+    protected async waitForServerPort(port: number, process: ChildProcessWithoutNullStreams): Promise<void> {
         const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
 
         while (Date.now() < deadline) {
+            if (this.serverProcess !== process || process.exitCode !== null || process.signalCode !== null) {
+                throw new Error('The Turtle language server exited before it became ready.');
+            }
             if (await this.isServerListening(port, process)) {
                 return;
             }
@@ -177,7 +202,7 @@ export class TurtleLanguageServer {
 
             process.once('exit', exitListener);
 
-            const socket = net.connect({ host: '127.0.0.1', port }, () => {
+            const socket = net.connect({host: '127.0.0.1', port}, () => {
                 finish(() => {
                     socket.end();
                     resolve(true);
@@ -195,5 +220,22 @@ export class TurtleLanguageServer {
 
     private delay(milliseconds: number): Promise<void> {
         return new Promise(resolve => setTimeout(resolve, milliseconds));
+    }
+
+    private reportExit(process: ChildProcessWithoutNullStreams, code: number | null, signal: NodeJS.Signals | null): void {
+        if (this.reportedProcesses.has(process)) {
+            return;
+        }
+        this.reportedProcesses.add(process);
+        if (this.serverProcess === process) {
+            this.serverProcess = undefined;
+        }
+        const event: ServerExitEvent = Object.freeze({
+            pid: process.pid,
+            code,
+            signal,
+            expected: this.expectedProcesses.has(process),
+        });
+        this.exitListeners.forEach(listener => listener(event));
     }
 }
