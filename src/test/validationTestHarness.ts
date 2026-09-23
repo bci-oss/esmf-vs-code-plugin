@@ -20,11 +20,12 @@ import {
     ValidationWindow,
     ValidationWorkspace,
 } from '../aspectValidation';
-import type { ExtensionLogger } from '../outputChannel';
+import type {ExtensionLogger} from '../outputChannel';
 
 type ValidationHarnessOptions = {
     response?: DiagnosticReport;
     error?: Error;
+    request?: <R>(method: string, params?: unknown) => Promise<R>;
 };
 
 type RecordedRequest = {
@@ -44,9 +45,10 @@ type FakeWorkspace = ValidationWorkspace & {
     fireSave(document: Pick<vscode.TextDocument, 'languageId' | 'uri'>): Promise<void>;
 };
 
-type FakeOutputChannel = ValidationOutputChannel & ExtensionLogger & {
-    lines: string[];
-};
+type FakeOutputChannel = ValidationOutputChannel &
+    ExtensionLogger & {
+        lines: string[];
+    };
 
 export function createValidationControllerHarness(options: ValidationHarnessOptions = {}) {
     const sentRequests: RecordedRequest[] = [];
@@ -56,6 +58,10 @@ export function createValidationControllerHarness(options: ValidationHarnessOpti
     const client: RequestClient = {
         sendRequest: async <R>(method: string, params?: unknown) => {
             sentRequests.push({method, params});
+
+            if (options.request) {
+                return options.request<R>(method, params);
+            }
 
             if (options.error) {
                 throw options.error;
