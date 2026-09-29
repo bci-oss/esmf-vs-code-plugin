@@ -84,10 +84,13 @@
           "description": "TCP port used to connect to the SAMM language server.",
           "order": 3
         },
-        "semantic-models.languageServerSettings.additionalStartupOptions": {
-          "type": "string",
-          "default": "",
-          "description": "Additional comma-separated command-line options (e.g. -Dkey=value, -Dkey2=value2) to pass when starting the language server.",
+        "semantic-models.languageServerSettings.environmentVariables": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Environment variables to set when starting the embedded language server (native executable or JAR). Values must be strings and override inherited environment variables. Does not affect externally managed servers.",
           "order": 4
         },
         "semantic-models.modelResolution.githubRepositories": {

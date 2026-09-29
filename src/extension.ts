@@ -133,7 +133,7 @@ function createLanguageServicesSupervisor(): LanguageServicesSupervisor {
             outputChannel,
             settings.getSammCliPath(),
             configuration.port,
-            settings.getSammCliLspAdditionalStartupOptions(),
+            settings.getSammCliLspEnvironmentVariables(),
             logOutputChannel.logLevel,
         ),
         createClient: configuration => new TurtleLanguageClient(outputChannel, configuration.port, logOutputChannel.logLevel),
