@@ -49,10 +49,6 @@ export interface ValidationWindow {
     setStatusBarMessage(text: string, hideAfterTimeout: number): vscode.Disposable;
 }
 
-export interface ValidationWorkspace {
-    onDidSaveTextDocument(listener: (document: vscode.TextDocument) => void): vscode.Disposable;
-}
-
 export type ValidationOutputChannel = ExtensionLogger;
 
 export class AspectValidationController {
@@ -61,7 +57,6 @@ export class AspectValidationController {
     constructor(
         client: RequestClient,
         private readonly window: ValidationWindow,
-        private readonly workspace: ValidationWorkspace,
         private readonly outputChannel: ValidationOutputChannel,
     ) {
         this.binding = {client, generation: 0};
@@ -76,10 +71,7 @@ export class AspectValidationController {
             vscode.commands.registerCommand(VALIDATE_DOCUMENT_COMMAND, async () => {
                 const editor = vscode.window.activeTextEditor;
                 await this.validateDocument(editor?.document, 'manual');
-            }),
-            this.workspace.onDidSaveTextDocument(document => {
-                void this.validateDocument(document, 'save');
-            }),
+            })
         );
     }
 

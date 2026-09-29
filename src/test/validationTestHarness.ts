@@ -18,7 +18,6 @@ import {
     RequestClient,
     ValidationOutputChannel,
     ValidationWindow,
-    ValidationWorkspace,
 } from '../aspectValidation';
 import type {ExtensionLogger} from '../outputChannel';
 
@@ -41,10 +40,6 @@ type FakeWindow = ValidationWindow & {
     warningMessages: string[];
 };
 
-type FakeWorkspace = ValidationWorkspace & {
-    fireSave(document: Pick<vscode.TextDocument, 'languageId' | 'uri'>): Promise<void>;
-};
-
 type FakeOutputChannel = ValidationOutputChannel &
     ExtensionLogger & {
         lines: string[];
@@ -53,7 +48,6 @@ type FakeOutputChannel = ValidationOutputChannel &
 export function createValidationControllerHarness(options: ValidationHarnessOptions = {}) {
     const sentRequests: RecordedRequest[] = [];
     const window = createFakeWindow();
-    const workspace = createFakeWorkspace();
     const outputChannel = createFakeOutputChannel();
     const client: RequestClient = {
         sendRequest: async <R>(method: string, params?: unknown) => {
@@ -72,11 +66,10 @@ export function createValidationControllerHarness(options: ValidationHarnessOpti
     };
 
     return {
-        controller: new AspectValidationController(client, window, workspace, outputChannel),
+        controller: new AspectValidationController(client, window, outputChannel),
         outputChannel,
         sentRequests,
         window,
-        workspace,
     };
 }
 
@@ -84,20 +77,6 @@ export function createValidationDocument(filePath: string): Pick<vscode.TextDocu
     return {
         languageId: 'turtle',
         uri: vscode.Uri.file(filePath),
-    };
-}
-
-function createFakeWorkspace(): FakeWorkspace {
-    let saveListener: ((document: vscode.TextDocument) => void | Promise<void>) | undefined;
-
-    return {
-        onDidSaveTextDocument: (listener: (document: vscode.TextDocument) => void | Promise<void>) => {
-            saveListener = listener;
-            return new vscode.Disposable(() => undefined);
-        },
-        fireSave: async (document: Pick<vscode.TextDocument, 'languageId' | 'uri'>) => {
-            await saveListener?.(document as vscode.TextDocument);
-        },
     };
 }
 

@@ -17,8 +17,8 @@ features *Go to Definition* for elements and semantic model validation.
   - Path to the SAMM CLI executable or JAR file to use as the language server. Can be downloaded or selected using the 'Select SAMM CLI Executable' command.
 - `semantic-models.languageServerSettings.serverPort` (number, default: `1846`)
   - TCP port used to connect to the SAMM language server.
-- `semantic-models.languageServerSettings.additionalStartupOptions` (string, default: `""`)
-  - Additional comma-separated command-line options (e.g. `-Dkey=value`, `-Dkey2=value2`) to pass when starting the language server.
+- `semantic-models.languageServerSettings.environmentVariables` (object, default: `{}`)
+  - A map of environment variable names to string values for the embedded language server (native executable or JAR). These values override inherited environment variables; other inherited variables are preserved. Externally managed servers are unaffected.
 - `semantic-models.modelResolution.githubRepositories` (array, default: `[]`)
   - Additional GitHub repositories to use for Aspect Model Resolution (e.g. `Go to Definition` and validation of models referencing Aspect Models hosted in other repositories). Each entry supports:
     - `repository` (string, required) - repository in the format `owner/repository`, e.g. `eclipse-esmf/esmf-sdk`.
@@ -70,7 +70,7 @@ When each validation runs:
 
 - On type: fast syntax feedback only.
 - On save: heavy Aspect validation for Turtle documents.
-- Manual: `Semantic Models: Validate Document Now` for the active Turtle document.
+- Manual: `Semantic Models: Validate Document Now` for the active Turtle document. User gets a summary message with validation results.
 
 ## Commands
 
@@ -80,14 +80,6 @@ When each validation runs:
   - Opens a quick pick with the latest ten GitHub releases and a custom-path option.
 - `Semantic Models: Restart Language Server Connection`
   - Restarts the language server and reconnects the client.
-
-## UX During Long-Running Validation
-
-- Manual validation shows a progress notification while the request is running.
-- Save-triggered validation always uses a short status-bar progress indicator
-  instead of repeated pop-up notifications.
-- After completion, the user gets a summary message with validation results.
-- Automatic save validation keeps progress and completion status in the status bar.
 
 ## Verify Go To Definition
 
@@ -113,9 +105,3 @@ Manual check:
 2. Run `Semantic Models: Validate Document Now`.
 3. Wait for validation to complete.
 4. Confirm that validation results are displayed in a notification.
-
-On-save check:
-
-1. Save the model file.
-2. Confirm that the status bar shows validation progress.
-3. Confirm that a summary message appears in the status bar after completion.
