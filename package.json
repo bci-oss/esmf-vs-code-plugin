@@ -190,18 +190,18 @@
     "lint:fix": "eslint src --ext .ts --fix"
   },
   "devDependencies": {
-    "@types/jest": "^30.0.0",
+    "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/vscode": "^1.110.0",
-    "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2",
-    "eslint": "^9.39.3",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.56.1"
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "eslint": "^10.11.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.0"
   },
   "dependencies": {
     "extract-zip": "^2.0.1",
-    "tar": "^7.5.15",
-    "vscode-languageclient": "^9.0.1"
+    "tar": "^7.5.22",
+    "vscode-languageclient": "^10.1.2"
   }
 }
