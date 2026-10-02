@@ -47,8 +47,8 @@ export class TurtleExtensionSettings {
         return vscode.workspace.getConfiguration('semantic-models.languageServerSettings').get<number>('serverPort', 1846);
     }
 
-    getSammCliLspAdditionalStartupOptions(): string {
-        return vscode.workspace.getConfiguration('semantic-models.languageServerSettings').get<string>('additionalStartupOptions', '');
+    getSammCliLspEnvironmentVariables(): Record<string, string> {
+        return vscode.workspace.getConfiguration('semantic-models.languageServerSettings').get<Record<string, string>>('environmentVariables', {});
     }
 
     getGithubRepositories(): Array<GithubRepositoryConfig> {

@@ -45,7 +45,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     settings = new TurtleExtensionSettings();
     sammCliDownloader = new SammCliDownloader(context, settings, outputChannel);
     gitHubRepositoryValidator = new GitHubRepositoryValidator(outputChannel);
-    aspectValidationController = new AspectValidationController(createUnavailableClient(), vscode.window, vscode.workspace, outputChannel);
+    aspectValidationController = new AspectValidationController(createUnavailableClient(), vscode.window, outputChannel);
     aspectValidationController.register(context);
     languageServicesSupervisor = createLanguageServicesSupervisor();
 
@@ -133,7 +133,7 @@ function createLanguageServicesSupervisor(): LanguageServicesSupervisor {
             outputChannel,
             settings.getSammCliPath(),
             configuration.port,
-            settings.getSammCliLspAdditionalStartupOptions(),
+            settings.getSammCliLspEnvironmentVariables(),
             logOutputChannel.logLevel,
         ),
         createClient: configuration => new TurtleLanguageClient(outputChannel, configuration.port, logOutputChannel.logLevel),

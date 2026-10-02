@@ -77,25 +77,6 @@ suite('AspectValidationController', () => {
         assert.deepStrictEqual(harness.window.errorMessages, ['Aspect validation request failed: connection failed']);
     });
 
-    test('uses status messages rather than notifications for save validation', async () => {
-        await withStubbedRegisterCommand(async () => {
-            const harness = createValidationControllerHarness({response: {diagnostics: []}});
-            harness.controller.register({subscriptions: []} as unknown as vscode.ExtensionContext);
-
-            await harness.workspace.fireSave(createValidationDocument('/tmp/model.ttl'));
-            for (let index = 0; index < 8; index++) {
-                await Promise.resolve();
-            }
-
-            assert.deepStrictEqual(harness.window.statusMessages, [
-                'Aspect model validation in progress...',
-                'Aspect validation completed without issues.',
-            ]);
-            assert.deepStrictEqual(harness.window.infoMessages, []);
-            assert.deepStrictEqual(harness.window.errorMessages, []);
-        });
-    });
-
     test('register remains compatible with the VS Code command surface', async () => {
         await withStubbedRegisterCommand(() => {
             const harness = createValidationControllerHarness();
