@@ -27,24 +27,8 @@ If setup or validation fails, see xref:support.adoc[Support].
 
 == Creating your own workspace
 
-Create a new folder for your models and open it in VS Code. The extension supports the following two directory layouts.
-
-=== Flat models root
-
-Store all files in the models root directory. This layout is suitable for small use cases or examples.
-
-[source,subs=+quotes]
-----
-_models root (open folder in VS Code)_
-├──  MyAspect.ttl
-├──  MyEntity.ttl
-└──  myProperty.ttl
-----
-
-=== Hierarchical models root
-
-Compared to the flat models root, the hierarchical models root allows easier organization of models by namespace and version.
-File paths must follow this structure: `namespace/version/name.ttl`.
+Create a new folder for your models and open it in VS Code.
+Models must be organized in a hierarchical manner, file paths must follow the structure: `namespace/version/name.ttl`.
 
 [source,subs=+quotes]
 ----
@@ -61,5 +45,5 @@ _models root (open folder in VS Code)_
 The namespace and version directories must match the namespace and version in the model URNs.
 For example, files in `com.mycompany.myproduct/1.0.0` use `@prefix : <urn:samm:com.mycompany.myproduct:1.0.0#> .`.
 
-Read more about https://eclipse-esmf.github.io/esmf-developer-guide/tooling-guide/samm-cli.html#models-directory-structure[models directory structure,opts=nofollow]
-and https://eclipse-esmf.github.io/esmf-developer-guide/tooling-guide/java-aspect-tooling.html#understanding-model-resolution[model resolution,opts=nofollow].
+Read more about xref:esmf-developer-guide:tooling-guide:samm-cli.adoc#models-directory-structure[models directory structure,opts=nofollow]
+and xref:esmf-developer-guide:tooling-guide:java-aspect-tooling.adoc#understanding-model-resolution[model resolution,opts=nofollow].

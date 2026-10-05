@@ -3,7 +3,7 @@
 For troubleshooting, see the <<known-issues,known issues>> below.
 Also make sure your system meets the xref:system-requirements.adoc[system requirements].
 
-As the Semantic Models extension relies on the SAMM specification, also check out the https://eclipse-esmf.github.io/samm-specification/snapshot/index.html[SAMM Aspect Meta Model,opts=nofollow].
+As the Semantic Models extension relies on the SAMM specification, also check out the xref:samm-specification:ROOT:index.adoc[SAMM Aspect Meta Model,opts=nofollow].
 
 For further support, open an https://github.com/eclipse-esmf/esmf-vs-code-plugin/issues[issue in GitHub^,opts=nofollow].
 Include the following in your issue:
@@ -31,8 +31,8 @@ If the release picker or download fails, try selecting a manually downloaded CLI
 [[language-server-stops-being-available]]
 === Language server stops being available
 
-The language server may occasionally crash, making language features unavailable.
-To restart it manually, open the Command Palette (View -> Command Palette) and run `Semantic Models: Restart Language Server Connection`.
+If languages features such as syntax highlighting are unavailable, it may be due to the language server not running.
+To start or restart it manually, open the Command Palette (View -> Command Palette) and run `Semantic Models: Restart Language Server Connection`.
 
 
 == Accessing the VS Code extension logs (for troubleshooting/debugging)
