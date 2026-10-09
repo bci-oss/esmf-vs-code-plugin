@@ -14,12 +14,17 @@
 import {Trace} from 'vscode-jsonrpc';
 import * as net from 'node:net';
 import * as vscode from 'vscode';
-import {CloseAction, ErrorAction, ErrorHandler, LanguageClient, LanguageClientOptions, State, StreamInfo} from 'vscode-languageclient/node';
+import {CloseAction, DocumentFilter, ErrorAction, ErrorHandler, LanguageClient, LanguageClientOptions, State, StreamInfo} from 'vscode-languageclient/node';
 import type {RequestClient} from './aspectValidation';
 import type {ExtensionLogger} from './outputChannel';
 import type {DisposableLike} from './languageServicesSupervisor';
 
 const CLIENT_START_TIMEOUT_MS = 60_000;
+
+export const TURTLE_DOCUMENT_SELECTOR: DocumentFilter[] = [
+    {language: 'turtle', scheme: 'file'},
+    {language: 'turtle', scheme: 'untitled'},
+];
 
 export function createDoNotRestartErrorHandler(onUnexpectedClose: () => void): ErrorHandler {
     let closeReported = false;
@@ -77,7 +82,7 @@ export class TurtleLanguageClient implements RequestClient {
             });
 
         const clientOptions: LanguageClientOptions = {
-            documentSelector: ['turtle'],
+            documentSelector: TURTLE_DOCUMENT_SELECTOR,
             synchronize: {
                 fileEvents: vscode.workspace.createFileSystemWatcher('**/*.ttl'),
                 configurationSection: 'semantic-models.modelResolution',

@@ -73,10 +73,12 @@ export function createValidationControllerHarness(options: ValidationHarnessOpti
     };
 }
 
-export function createValidationDocument(filePath: string): Pick<vscode.TextDocument, 'languageId' | 'uri'> {
+export function createValidationDocument(
+    filePathOrUri: string | vscode.Uri,
+): Pick<vscode.TextDocument, 'languageId' | 'uri'> {
     return {
         languageId: 'turtle',
-        uri: vscode.Uri.file(filePath),
+        uri: typeof filePathOrUri === 'string' ? vscode.Uri.file(filePathOrUri) : filePathOrUri,
     };
 }
 
