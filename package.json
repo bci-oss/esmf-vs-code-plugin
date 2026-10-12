@@ -94,10 +94,13 @@
           "description": "TCP port used to connect to the SAMM language server.",
           "order": 3
         },
-        "semantic-models.languageServerSettings.additionalStartupOptions": {
-          "type": "string",
-          "default": "",
-          "description": "Additional comma-separated command-line options (e.g. -Dkey=value, -Dkey2=value2) to pass when starting the language server.",
+        "semantic-models.languageServerSettings.environmentVariables": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Environment variables to set when starting the embedded language server (native executable or JAR). Values must be strings and override inherited environment variables. Does not affect externally managed servers.",
           "order": 4
         },
         "semantic-models.modelResolution.githubRepositories": {
@@ -160,7 +163,7 @@
       "editor/context": [
         {
           "command": "semantic-models.validateDocumentNow",
-          "when": "resourceLangId == turtle",
+          "when": "resourceLangId == turtle && (resourceScheme == file || resourceScheme == untitled)",
           "group": "1_modification"
         },
         {
@@ -191,7 +194,7 @@
             "description": "To validate an RDF/Turtle file or a SAMM Aspect Model, simply open it in VS Code. The extension will automatically connect to the language server and display any validation issues in the Problems view. You can also trigger validation manually using the 'Validate Document Now' command from the Command Palette.",
             "media": {
               "image": "media/walkthrough_validation.png",
-              "altText": "Example of validation issues shown in the Problems panel"
+              "altText": "Example of validation issues shown in the Problems view"
             }
           }
         ]
@@ -213,18 +216,18 @@
     "test:webview-assets": "node scripts/verify-webview-assets.mjs"
   },
   "devDependencies": {
-    "@types/jest": "^30.0.0",
+    "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/vscode": "^1.110.0",
-    "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2",
-    "eslint": "^9.39.3",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.56.1"
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "eslint": "^10.11.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.0"
   },
   "dependencies": {
     "extract-zip": "^2.0.1",
-    "tar": "^7.5.15",
-    "vscode-languageclient": "^9.0.1"
+    "tar": "^7.5.22",
+    "vscode-languageclient": "^10.1.2"
   }
 }

@@ -49,7 +49,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     settings = new TurtleExtensionSettings();
     sammCliDownloader = new SammCliDownloader(context, settings, outputChannel);
     gitHubRepositoryValidator = new GitHubRepositoryValidator(outputChannel);
-    aspectValidationController = new AspectValidationController(createUnavailableClient(), vscode.window, vscode.workspace, outputChannel);
+    aspectValidationController = new AspectValidationController(createUnavailableClient(), vscode.window, outputChannel);
     aspectValidationController.register(context);
     graphicalViewController = new GraphicalViewController(
         undefined,
@@ -171,7 +171,7 @@ function createLanguageServicesSupervisor(): LanguageServicesSupervisor {
             outputChannel,
             settings.getSammCliPath(),
             configuration.port,
-            settings.getSammCliLspAdditionalStartupOptions(),
+            settings.getSammCliLspEnvironmentVariables(),
             logOutputChannel.logLevel,
         ),
         createClient: configuration => new TurtleLanguageClient(outputChannel, configuration.port, logOutputChannel.logLevel),
@@ -215,7 +215,7 @@ async function notifyTerminalRecoveryFailure(mode: LanguageServicesMode): Promis
 }
 
 type SammCliQuickPickItem = vscode.QuickPickItem & {
-    action: 'customPath' | 'release';
+    action: 'customPath' | 'release' | 'help';
     releaseTag?: string;
 };
 
@@ -250,8 +250,8 @@ async function selectSammCliExecutable(): Promise<void> {
     if (releaseItems.length === 0) {
         releaseItems.push({
             label: '$(error) No GitHub releases available',
-            detail: 'Failed to fetch releases from GitHub. Check output channel for details.',
-            action: 'release',
+            detail: 'Failed to fetch releases from GitHub. Click for help.',
+            action: 'help',
         });
     }
 
@@ -262,6 +262,11 @@ async function selectSammCliExecutable(): Promise<void> {
     });
 
     if (!pick) {
+        return;
+    }
+
+    if (pick.action === 'help') {
+        await vscode.env.openExternal(vscode.Uri.parse('https://eclipse-esmf.github.io/vs-code-plugin/support.html#selection-and-download-of-samm-cli-fails'));
         return;
     }
 

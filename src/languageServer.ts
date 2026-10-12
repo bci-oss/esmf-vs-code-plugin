@@ -32,7 +32,7 @@ export class TurtleLanguageServer {
         private readonly outputChannel: ExtensionLogger,
         private readonly sammCliExecutablePath: string,
         private readonly serverPort: number,
-        private readonly additionalStartupOptions: string,
+        private readonly environmentVariables: Record<string, string>,
         private readonly logLevel: vscode.LogLevel,
     ) {}
 
@@ -46,11 +46,10 @@ export class TurtleLanguageServer {
     }
 
     async start(): Promise<void> {
-        const additionalStartupArgs = this.additionalStartupOptions.split(',').map(option => option.trim()).filter(option => option.length > 0);
         const traceArgs = this.toTraceArgs(this.logLevel);
         const [executable, args] = this.sammCliExecutablePath.endsWith('.jar')
-            ? ['java', [...JAVA_OPTIONS, ...additionalStartupArgs, '-jar', this.sammCliExecutablePath, ...traceArgs, 'lsp', '--port', String(this.serverPort)]]
-            : [this.sammCliExecutablePath, [...additionalStartupArgs, ...traceArgs, 'lsp', '--port', String(this.serverPort)]];
+            ? ['java', [...JAVA_OPTIONS, '-jar', this.sammCliExecutablePath, ...traceArgs, 'lsp', '--port', String(this.serverPort)]]
+            : [this.sammCliExecutablePath, [...traceArgs, 'lsp', '--port', String(this.serverPort)]];
 
         this.serverProcess = this.spawnProcess(executable, args);
         this.outputChannel.info(
@@ -137,7 +136,7 @@ export class TurtleLanguageServer {
     protected createChildProcess(executable: string, args: string[]): ChildProcessWithoutNullStreams {
         const spawnOptions = {
             cwd: this.context.extensionPath,
-            env: process.env,
+            env: {...process.env, ...this.environmentVariables},
             stdio: 'pipe' as const,
         };
 

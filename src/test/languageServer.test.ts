@@ -54,7 +54,7 @@ class TestLanguageServer extends TurtleLanguageServer {
             warn: () => undefined,
             error: () => undefined,
         };
-        super({extensionPath: '/tmp/test-extension'} as vscode.ExtensionContext, logger, '/tmp/test-samm-cli', 19461, '', vscode.LogLevel.Off);
+        super({extensionPath: '/tmp/test-extension'} as vscode.ExtensionContext, logger, '/tmp/test-samm-cli', 19461, {}, vscode.LogLevel.Off);
     }
 
     protected override createChildProcess(): ChildProcessWithoutNullStreams {

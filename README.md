@@ -7,6 +7,8 @@ For RDF/Turtle documents, it features syntax highlighting, document outline and
 automatic syntax validation. For SAMM Aspect Models, the extension additionally
 features *Go to Definition* for elements and semantic model validation.
 
+For installation, prerequisites, and a sample walkthrough, see the [user guide](https://eclipse-esmf.github.io/vs-code-plugin/introduction.html).
+
 ## Configuration
 
 - `semantic-models.languageServerSettings.activateEmbeddedLanguageServer` (boolean, default: `true`)
@@ -17,8 +19,8 @@ features *Go to Definition* for elements and semantic model validation.
   - Path to the SAMM CLI executable or JAR file to use as the language server. Can be downloaded or selected using the 'Select SAMM CLI Executable' command.
 - `semantic-models.languageServerSettings.serverPort` (number, default: `1846`)
   - TCP port used to connect to the SAMM language server.
-- `semantic-models.languageServerSettings.additionalStartupOptions` (string, default: `""`)
-  - Additional comma-separated command-line options (e.g. `-Dkey=value`, `-Dkey2=value2`) to pass when starting the language server.
+- `semantic-models.languageServerSettings.environmentVariables` (object, default: `{}`)
+  - A map of environment variable names to string values for the embedded language server (native executable or JAR). These values override inherited environment variables; other inherited variables are preserved. Externally managed servers are unaffected.
 - `semantic-models.modelResolution.githubRepositories` (array, default: `[]`)
   - Additional GitHub repositories to use for Aspect Model Resolution (e.g. `Go to Definition` and validation of models referencing Aspect Models hosted in other repositories). Each entry supports:
     - `repository` (string, required) - repository in the format `owner/repository`, e.g. `eclipse-esmf/esmf-sdk`.
@@ -34,10 +36,13 @@ Use the command `Semantic Models: Select SAMM CLI Executable` to choose either:
 
 ## Features
 
-- Prefix `Go to Definition` inside Turtle files.
+- `Go to Definition` of referenced elements within the same file, current workspace and also for SAMM elements.
 - Two-level validation:
-  - Fast validation while typing from the regular Turtle parser diagnostics provided by the server (appear in the editor and `Problems`).
-  - Full Aspect validation from the server for model-level issues (results shown in notifications and status bar).
+  - Fast validation while typing from the regular Turtle parser.
+  - Full Aspect Model validation for model-level issues.
+- Resolve Aspect Models from a GitHub repository:
+  - Configure GitHub repositories that contain Aspect Models in extension settings.
+  - Reference elements of these Aspect Models. Features like validation and `Go to Definition` automatically fetch the model from GitHub.
 - Manual validation command:
   - `Semantic Models: Validate Document Now`
 
@@ -58,30 +63,28 @@ Graphical View supports SVG only from the shipped/current trusted SAMM language 
 1. In this extension project, install the dependencies using `npm install`.
 2. Build the extension with `npm run build`.
 3. Press `F5` in VS Code to open an Extension Development Host.
-4. Open an RDF/Turtle file such as [samples/valid.ttl](samples/valid.ttl) or your Aspect model file.
+4. Open any RDF/Turtle.
 
-If the server cannot be downloaded or started, the extension shows an error and writes a detailed message in the Turtle LSP output channel.
+If the server cannot be downloaded or started, the extension shows an error and writes a detailed message in the Semantic Models output channel.
 
 ## Validation Behavior
 
 Fast feedback while typing:
 
-- Driven by the server's regular Turtle parsing diagnostics.
-- Results appear in the editor and `Problems` view.
-- Intended for quick editor feedback while you type.
+- Issues are shown immediately in the editor and Problems view.
+- Intended for quick feedback while you type.
 
 Full Aspect validation:
 
 - Runs on the server, not in the extension.
-- Results are displayed in notification messages (for manual validation) or status bar (for save-triggered validation).
+- Results appear in the editor and `Problems` view.
 - Always uses detailed server validation messaging when the server returns report text.
-- Always shows visible progress for long-running validation.
-- Runs automatically when saving and can also be triggered manually.
+- Runs automatically after a 4 second delay and when saving.
 
 When each validation runs:
 
-- On type: fast syntax feedback only.
-- On save: heavy Aspect validation for Turtle documents.
+- While typing: Turtle syntax feedback.
+- After a pause and on save: full Aspect Model validation.
 - Manual: `Semantic Models: Validate Document Now` for the active Turtle document.
 
 ## Commands
@@ -92,42 +95,3 @@ When each validation runs:
   - Opens a quick pick with the latest ten GitHub releases and a custom-path option.
 - `Semantic Models: Restart Language Server Connection`
   - Restarts the language server and reconnects the client.
-
-## UX During Long-Running Validation
-
-- Manual validation shows a progress notification while the request is running.
-- Save-triggered validation always uses a short status-bar progress indicator
-  instead of repeated pop-up notifications.
-- After completion, the user gets a summary message with validation results.
-- Automatic save validation keeps progress and completion status in the status bar.
-
-## Verify Go To Definition
-
-Use [samples/valid.ttl](samples/valid.ttl):
-
-1. Open `samples/valid.ttl`.
-2. Place the cursor on `foaf:Person`, `foaf:name`, or another prefixed name.
-3. Run `Go to Definition`.
-4. Confirm that VS Code jumps to the matching `@prefix` declaration.
-
-Expected behavior:
-
-- `foaf:*` resolves to `@prefix foaf: ...`.
-- `ex:*` resolves to `@prefix ex: ...`.
-
-## Verify Aspect Validation
-
-Use [samples/org.eclipse.esmf.test/1.0.0/Aspect.ttl](samples/org.eclipse.esmf.test/1.0.0/Aspect.ttl) or [samples/invalid.ttl](samples/invalid.ttl).
-
-Manual check:
-
-1. Open an Aspect model file.
-2. Run `Semantic Models: Validate Document Now`.
-3. Wait for validation to complete.
-4. Confirm that validation results are displayed in a notification.
-
-On-save check:
-
-1. Save the model file.
-2. Confirm that the status bar shows validation progress.
-3. Confirm that a summary message appears in the status bar after completion.

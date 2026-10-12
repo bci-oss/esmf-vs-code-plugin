@@ -16,6 +16,7 @@ import type {ExtensionLogger} from './outputChannel';
 
 export const VALIDATE_DOCUMENT_REQUEST = 'turtle/aspectValidation/validateDocument';
 export const VALIDATE_DOCUMENT_COMMAND = 'semantic-models.validateDocumentNow';
+export const SUPPORTED_DOCUMENT_SCHEMES = ['file', 'untitled'];
 const STATUS_MESSAGE_TIMEOUT_MS = 5000;
 
 export type AspectValidationTrigger = 'manual' | 'save';
@@ -49,10 +50,6 @@ export interface ValidationWindow {
     setStatusBarMessage(text: string, hideAfterTimeout: number): vscode.Disposable;
 }
 
-export interface ValidationWorkspace {
-    onDidSaveTextDocument(listener: (document: vscode.TextDocument) => void): vscode.Disposable;
-}
-
 export type ValidationOutputChannel = ExtensionLogger;
 
 export class AspectValidationController {
@@ -61,7 +58,6 @@ export class AspectValidationController {
     constructor(
         client: RequestClient,
         private readonly window: ValidationWindow,
-        private readonly workspace: ValidationWorkspace,
         private readonly outputChannel: ValidationOutputChannel,
     ) {
         this.binding = {client, generation: 0};
@@ -76,10 +72,7 @@ export class AspectValidationController {
             vscode.commands.registerCommand(VALIDATE_DOCUMENT_COMMAND, async () => {
                 const editor = vscode.window.activeTextEditor;
                 await this.validateDocument(editor?.document, 'manual');
-            }),
-            this.workspace.onDidSaveTextDocument(document => {
-                void this.validateDocument(document, 'save');
-            }),
+            })
         );
     }
 
@@ -87,7 +80,7 @@ export class AspectValidationController {
         document: Pick<vscode.TextDocument, 'languageId' | 'uri'> | undefined,
         trigger: AspectValidationTrigger,
     ): Promise<DiagnosticReport | undefined> {
-        if (!document || document.languageId !== 'turtle') {
+        if (!document || document.languageId !== 'turtle' || !SUPPORTED_DOCUMENT_SCHEMES.includes(document.uri.scheme)) {
             if (trigger === 'manual') {
                 await this.window.showWarningMessage('Open a Turtle file before running aspect validation.');
             }
