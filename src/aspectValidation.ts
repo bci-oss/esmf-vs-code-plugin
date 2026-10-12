@@ -16,6 +16,7 @@ import type {ExtensionLogger} from './outputChannel';
 
 export const VALIDATE_DOCUMENT_REQUEST = 'turtle/aspectValidation/validateDocument';
 export const VALIDATE_DOCUMENT_COMMAND = 'semantic-models.validateDocumentNow';
+export const SUPPORTED_DOCUMENT_SCHEMES = ['file', 'untitled'];
 const STATUS_MESSAGE_TIMEOUT_MS = 5000;
 
 export type AspectValidationTrigger = 'manual' | 'save';
@@ -79,7 +80,7 @@ export class AspectValidationController {
         document: Pick<vscode.TextDocument, 'languageId' | 'uri'> | undefined,
         trigger: AspectValidationTrigger,
     ): Promise<DiagnosticReport | undefined> {
-        if (!document || document.languageId !== 'turtle') {
+        if (!document || document.languageId !== 'turtle' || !SUPPORTED_DOCUMENT_SCHEMES.includes(document.uri.scheme)) {
             if (trigger === 'manual') {
                 await this.window.showWarningMessage('Open a Turtle file before running aspect validation.');
             }

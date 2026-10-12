@@ -146,7 +146,7 @@
       "editor/context": [
         {
           "command": "semantic-models.validateDocumentNow",
-          "when": "resourceLangId == turtle",
+          "when": "resourceLangId == turtle && (resourceScheme == file || resourceScheme == untitled)",
           "group": "1_modification"
         }
       ]

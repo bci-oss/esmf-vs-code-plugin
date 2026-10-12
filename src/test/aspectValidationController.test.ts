@@ -77,6 +77,28 @@ suite('AspectValidationController', () => {
         assert.deepStrictEqual(harness.window.errorMessages, ['Aspect validation request failed: connection failed']);
     });
 
+    test('does not validate documents with an unsupported scheme', async () => {
+        const harness = createValidationControllerHarness({response: {diagnostics: []}});
+        const virtualDoc = createValidationDocument(vscode.Uri.parse('chat-editing-text-model:/tmp/Model.ttl'));
+
+        const result = await harness.controller.validateDocument(virtualDoc, 'manual');
+
+        assert.strictEqual(result, undefined);
+        assert.strictEqual(harness.sentRequests.length, 0);
+        assert.strictEqual(harness.window.warningMessages.length, 1);
+        assert.deepStrictEqual(harness.window.warningMessages, ['Open a Turtle file before running aspect validation.']);
+    });
+
+    test('validates untitled documents', async () => {
+        const harness = createValidationControllerHarness({response: {diagnostics: []}});
+        const untitledDoc = createValidationDocument(vscode.Uri.parse('untitled:Untitled-1'));
+
+        const result = await harness.controller.validateDocument(untitledDoc, 'manual');
+
+        assert.deepStrictEqual(result, {diagnostics: []});
+        assert.strictEqual(harness.sentRequests.length, 1);
+    });
+
     test('register remains compatible with the VS Code command surface', async () => {
         await withStubbedRegisterCommand(() => {
             const harness = createValidationControllerHarness();
