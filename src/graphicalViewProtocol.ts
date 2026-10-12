@@ -23,9 +23,9 @@ export type GraphicalViewRenderWarning =
     | 'missingDocument'
     | 'modelTooLarge'
     | 'timeout'
-    | 'temporarilyUnresolvable';
+    | 'unresolvable';
 
-export type GraphicalViewResolveTargetWarning = 'notFound' | 'ambiguous' | 'unsupportedUri' | 'temporarilyUnresolvable';
+export type GraphicalViewResolveTargetWarning = 'notFound' | 'ambiguous' | 'unsupportedUri' | 'unresolvable';
 
 export interface GraphicalViewRenderParams {
     uri: string;

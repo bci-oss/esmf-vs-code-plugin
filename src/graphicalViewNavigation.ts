@@ -23,7 +23,7 @@ const RESOLVE_WARNINGS: ReadonlySet<string> = new Set([
     'notFound',
     'ambiguous',
     'unsupportedUri',
-    'temporarilyUnresolvable',
+    'unresolvable',
 ]);
 
 export async function resolveGraphicalViewNavigation(
@@ -118,8 +118,8 @@ function resolveWarningMessage(warning: GraphicalViewResolveTargetWarning): stri
             return 'The graphical target is ambiguous in the current model.';
         case 'unsupportedUri':
             return 'The graphical target is not a local file and cannot be opened.';
-        case 'temporarilyUnresolvable':
-            return 'The graphical target is temporarily unavailable. Fix any model syntax errors and try again.';
+        case 'unresolvable':
+            return 'The graphical target is unavailable. Fix any model syntax errors and try again.';
     }
 }
 

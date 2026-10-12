@@ -57,7 +57,7 @@ export class FakeGraphicalViewClient implements GraphicalViewClient {
     readonly requests: RecordedRenderRequest[] = [];
     readonly resolveRequests: RecordedResolveRequest[] = [];
     readonly attributeResolveRequests: RecordedAttributeResolveRequest[] = [];
-    resolveResult: GraphicalViewResolveTargetResult = {location: null, warning: 'temporarilyUnresolvable'};
+    resolveResult: GraphicalViewResolveTargetResult = {location: null, warning: 'unresolvable'};
     resolveFailure: unknown | undefined;
     private readonly listeners = new Set<(available: boolean) => void>();
 

@@ -488,7 +488,7 @@ export class GraphicalViewController implements vscode.Disposable {
             case 'unsupportedUri':
                 this.setStale(state, warning, 'The source URI is not supported for graphical rendering.');
                 return;
-            case 'temporarilyUnresolvable':
+            case 'unresolvable':
             default:
                 this.setStale(state, warning ?? 'renderFailure', 'The model could not be loaded or parsed. The last successful diagram is retained.');
         }

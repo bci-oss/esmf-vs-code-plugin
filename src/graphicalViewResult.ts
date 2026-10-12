@@ -35,7 +35,7 @@ const RENDER_WARNINGS: ReadonlySet<string> = new Set([
     'missingDocument',
     'modelTooLarge',
     'timeout',
-    'temporarilyUnresolvable',
+    'unresolvable',
 ]);
 const ASPECT_MODEL_URN_PATTERN = /^urn:samm:[^\s#]+#[^\s#]+$/;
 const LANGUAGE_PATTERN = /^[a-z]{2,8}(?:-[a-z0-9]{1,8})*$/;
