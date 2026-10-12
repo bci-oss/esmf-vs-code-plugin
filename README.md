@@ -59,9 +59,8 @@ If the server cannot be downloaded or started, the extension shows an error and 
 
 Fast feedback while typing:
 
-- Driven by LSP server turtle tree sitter parser.
-- Results appear in the editor and `Problems` view.
-- Intended for quick editor feedback while you type.
+- Issues are shown immediately in the editor and Problems view.
+- Intended for quick feedback while you type.
 
 Full Aspect validation:
 

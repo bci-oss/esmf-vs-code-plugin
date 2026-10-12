@@ -13,4 +13,4 @@ image::walkthrough_validation.png[width=100%]
 
 The xref:ame-guide:ROOT:introduction.adoc[Aspect Model Editor,opts=nofollow] provides graphical editing of Aspect Models.
 The Semantic Models extension provides direct Turtle editing within VS Code, alongside its search, navigation and Git tools. 
-This is ideal for users like software developers, that are familiar with SAMM, RDF/Turtle and VS Code.
+This is ideal for users like software developers who are familiar with SAMM, RDF/Turtle and VS Code.

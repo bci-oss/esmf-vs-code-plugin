@@ -11,10 +11,10 @@ First, complete the xref:installation.adoc[installation and SAMM CLI setup].
 
 == Validating and navigating a model
 
-1. Create an arbitrary Problem, e.g. by removing the closing dot of a triple.
+1. Create an arbitrary problem, e.g., by removing the closing dot of a triple.
 2. Open *View -> Problems* and select the issue about the just removed dot.
 3. Re-add the dot.
-4. Wait for the validation to complete. The missing-dot issue should disappear.
+4. Wait for the validation to complete. The problem reported for the missing dot should disappear.
 
 Turtle syntax validation runs while typing. Aspect Model validation runs after a pause in editing and when saving.
 

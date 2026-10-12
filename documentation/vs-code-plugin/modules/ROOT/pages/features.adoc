@@ -27,9 +27,9 @@ E.g. the following configuration enables to resolve elements from the extension 
 {
 	"semantic-models.modelResolution.githubRepositories": [
 		{
-			"repository": "eclipse-esmf/esmf-vs-code-plugin",
+			"repository": "eclipse-esmf/esmf-examples",
 			"branch": "main",
-			"path": "samples"
+			"path": "aspect-models"
 		}
 	]
 }
