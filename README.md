@@ -51,7 +51,7 @@ Use the command `Semantic Models: Select SAMM CLI Executable` to choose either:
 1. In this extension project, install the dependencies using `npm install`.
 2. Build the extension with `npm run build`.
 3. Press `F5` in VS Code to open an Extension Development Host.
-4. Open an RDF/Turtle file such as [samples/valid.ttl](samples/valid.ttl) or your Aspect model file.
+4. Open any RDF/Turtle.
 
 If the server cannot be downloaded or started, the extension shows an error and writes a detailed message in the Semantic Models output channel.
 
@@ -83,28 +83,3 @@ When each validation runs:
   - Opens a quick pick with the latest ten GitHub releases and a custom-path option.
 - `Semantic Models: Restart Language Server Connection`
   - Restarts the language server and reconnects the client.
-
-## Verify Go To Definition
-
-Use [samples/valid.ttl](samples/valid.ttl):
-
-1. Open `samples/valid.ttl`.
-2. Place the cursor on `foaf:Person`, `foaf:name`, or another prefixed name.
-3. Run `Go to Definition`.
-4. Confirm that VS Code jumps to the matching `@prefix` declaration.
-
-Expected behavior:
-
-- `foaf:*` resolves to `@prefix foaf: ...`.
-- `ex:*` resolves to `@prefix ex: ...`.
-
-## Verify Aspect Validation
-
-Use [samples/org.eclipse.esmf.test/1.0.0/Aspect.ttl](samples/org.eclipse.esmf.test/1.0.0/Aspect.ttl) or [samples/invalid.ttl](samples/invalid.ttl).
-
-Manual check:
-
-1. Open an Aspect model file.
-2. Run `Semantic Models: Validate Document Now`.
-3. Wait for validation to complete.
-4. Confirm that validation results are displayed in a notification.

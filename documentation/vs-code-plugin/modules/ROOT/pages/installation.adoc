@@ -19,6 +19,6 @@ image::walkthrough_welcome.png[width=100%]
 Follow the instructions on the welcome screen to configure the extension.
 
 If the welcome screen does not open, you need to manually configure the extension. Open *View -> Command Palette*, run *Semantic Models: Select SAMM CLI Executable*.
-Configuration this executable is necessary for the extension to work properly.
+Configuring this executable is necessary for the extension to work properly.
 
 If setup or validation fails, see xref:support.adoc[Support].

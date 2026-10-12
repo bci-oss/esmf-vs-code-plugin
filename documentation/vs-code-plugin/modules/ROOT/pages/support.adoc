@@ -31,7 +31,7 @@ If the release picker or download fails, try selecting a manually downloaded CLI
 [[language-server-stops-being-available]]
 === Language server stops being available
 
-If languages features such as syntax highlighting are unavailable, it may be due to the language server not running.
+If language features such as syntax highlighting are unavailable, it may be due to the language server not running.
 To start or restart it manually, open the Command Palette (View -> Command Palette) and run `Semantic Models: Restart Language Server Connection`.
 
 
