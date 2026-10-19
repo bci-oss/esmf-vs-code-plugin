@@ -14,7 +14,7 @@
 import * as vscode from 'vscode';
 import {
     AspectValidationController,
-    DiagnosticReport,
+    ValidationResult,
     RequestClient,
     ValidationOutputChannel,
     ValidationWindow,
@@ -22,7 +22,7 @@ import {
 import type {ExtensionLogger} from '../outputChannel';
 
 type ValidationHarnessOptions = {
-    response?: DiagnosticReport;
+    response?: ValidationResult;
     error?: Error;
     request?: <R>(method: string, params?: unknown) => Promise<R>;
 };
@@ -61,7 +61,7 @@ export function createValidationControllerHarness(options: ValidationHarnessOpti
                 throw options.error;
             }
 
-            return (options.response ?? {valid: true}) as R;
+            return (options.response ?? 'Success') as R;
         },
     };
 

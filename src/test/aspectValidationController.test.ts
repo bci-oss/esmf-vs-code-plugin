@@ -32,13 +32,13 @@ async function withStubbedRegisterCommand(run: () => void | Promise<void>): Prom
 
 suite('AspectValidationController', () => {
     test('ignores a stale successful request after client replacement', async () => {
-        let resolveRequest: ((value: {diagnostics: []}) => void) | undefined;
-        const request = new Promise<{diagnostics: []}>(resolve => (resolveRequest = resolve));
+        let resolveRequest: ((value: 'Success') => void) | undefined;
+        const request = new Promise<'Success'>(resolve => (resolveRequest = resolve));
         const harness = createValidationControllerHarness({request: async <R>() => request as Promise<R>});
         const validation = harness.controller.validateDocument(createValidationDocument('/tmp/model.ttl'), 'manual');
 
-        harness.controller.setClient({sendRequest: async <R>() => ({diagnostics: []}) as R}, 2);
-        resolveRequest?.({diagnostics: []});
+        harness.controller.setClient({sendRequest: async <R>() => ('Success') as R}, 2);
+        resolveRequest?.('Success');
 
         assert.strictEqual(await validation, undefined);
         assert.deepStrictEqual(harness.window.infoMessages, []);
@@ -52,7 +52,7 @@ suite('AspectValidationController', () => {
         const harness = createValidationControllerHarness({request: async <R>() => request as Promise<R>});
         const validation = harness.controller.validateDocument(createValidationDocument('/tmp/model.ttl'), 'manual');
 
-        harness.controller.setClient({sendRequest: async <R>() => ({diagnostics: []}) as R}, 2);
+        harness.controller.setClient({sendRequest: async <R>() => ('Success') as R}, 2);
         rejectRequest?.(new Error('old connection failed'));
 
         assert.strictEqual(await validation, undefined);
@@ -61,12 +61,33 @@ suite('AspectValidationController', () => {
     });
 
     test('reports the current successful request', async () => {
-        const harness = createValidationControllerHarness({response: {diagnostics: []}});
+        const harness = createValidationControllerHarness({response: 'Success'});
         const result = await harness.controller.validateDocument(createValidationDocument('/tmp/model.ttl'), 'manual');
 
-        assert.deepStrictEqual(result, {diagnostics: []});
+        assert.deepStrictEqual(result, 'Success');
         assert.deepStrictEqual(harness.window.infoMessages, ['Aspect validation completed without issues.']);
         assert.strictEqual(harness.sentRequests[0].method, VALIDATE_DOCUMENT_REQUEST);
+    });
+
+    test('reports an Error result and points to the Problems view on manual validation', async () => {
+        const harness = createValidationControllerHarness({response: 'Error'});
+        const result = await harness.controller.validateDocument(createValidationDocument('/tmp/model.ttl'), 'manual');
+
+        assert.strictEqual(result, 'Error');
+        assert.deepStrictEqual(harness.window.errorMessages, ['Aspect validation failed. See the Problems view for details.']);
+        assert.deepStrictEqual(harness.window.infoMessages, []);
+    });
+
+    test('shows the summary in the status bar on save-triggered validation', async () => {
+        const success = createValidationControllerHarness({response: 'Success'});
+        await success.controller.validateDocument(createValidationDocument('/tmp/model.ttl'), 'save');
+        assert.ok(success.window.statusMessages.includes('Aspect validation completed without issues.'));
+        assert.deepStrictEqual(success.window.infoMessages, []);
+
+        const failure = createValidationControllerHarness({response: 'Error'});
+        await failure.controller.validateDocument(createValidationDocument('/tmp/model.ttl'), 'save');
+        assert.ok(failure.window.statusMessages.includes('Aspect validation failed. See the Problems view for details.'));
+        assert.deepStrictEqual(failure.window.errorMessages, []);
     });
 
     test('reports the current failed request', async () => {
@@ -78,7 +99,7 @@ suite('AspectValidationController', () => {
     });
 
     test('does not validate documents with an unsupported scheme', async () => {
-        const harness = createValidationControllerHarness({response: {diagnostics: []}});
+        const harness = createValidationControllerHarness({response: 'Success'});
         const virtualDoc = createValidationDocument(vscode.Uri.parse('chat-editing-text-model:/tmp/Model.ttl'));
 
         const result = await harness.controller.validateDocument(virtualDoc, 'manual');
@@ -90,12 +111,12 @@ suite('AspectValidationController', () => {
     });
 
     test('validates untitled documents', async () => {
-        const harness = createValidationControllerHarness({response: {diagnostics: []}});
+        const harness = createValidationControllerHarness({response: 'Success'});
         const untitledDoc = createValidationDocument(vscode.Uri.parse('untitled:Untitled-1'));
 
         const result = await harness.controller.validateDocument(untitledDoc, 'manual');
 
-        assert.deepStrictEqual(result, {diagnostics: []});
+        assert.deepStrictEqual(result, 'Success');
         assert.strictEqual(harness.sentRequests.length, 1);
     });
 
