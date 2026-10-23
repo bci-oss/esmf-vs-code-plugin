@@ -14,21 +14,14 @@
 import * as vscode from 'vscode';
 import type {ExtensionLogger} from './outputChannel';
 
-export const VALIDATE_DOCUMENT_REQUEST = 'turtle/aspectValidation/validateDocument';
+export const VALIDATE_DOCUMENT_REQUEST = 'turtle/aspectValidation/validateDocumentV2';
 export const VALIDATE_DOCUMENT_COMMAND = 'semantic-models.validateDocumentNow';
 export const SUPPORTED_DOCUMENT_SCHEMES = ['file', 'untitled'];
 const STATUS_MESSAGE_TIMEOUT_MS = 5000;
 
 export type AspectValidationTrigger = 'manual' | 'save';
 
-export interface TurtleDiagnostic {
-    code: string;
-    message: string;
-}
-
-export interface DiagnosticReport {
-    diagnostics: Array<TurtleDiagnostic>;
-}
+export type ValidationResult = 'validation_successful' | 'validation_failed';
 
 export interface RequestClient {
     sendRequest<R>(method: string, params?: unknown): Thenable<R>;
@@ -79,7 +72,7 @@ export class AspectValidationController {
     async validateDocument(
         document: Pick<vscode.TextDocument, 'languageId' | 'uri'> | undefined,
         trigger: AspectValidationTrigger,
-    ): Promise<DiagnosticReport | undefined> {
+    ): Promise<ValidationResult | undefined> {
         if (!document || document.languageId !== 'turtle' || !SUPPORTED_DOCUMENT_SCHEMES.includes(document.uri.scheme)) {
             if (trigger === 'manual') {
                 await this.window.showWarningMessage('Open a Turtle file before running aspect validation.');
@@ -89,7 +82,7 @@ export class AspectValidationController {
 
         const binding = this.binding;
         const request = () =>
-            binding.client.sendRequest<DiagnosticReport>(VALIDATE_DOCUMENT_REQUEST, {
+            binding.client.sendRequest<ValidationResult>(VALIDATE_DOCUMENT_REQUEST, {
                 uri: document.uri.toString(),
                 reason: trigger,
             });
@@ -101,8 +94,8 @@ export class AspectValidationController {
         title: string,
         trigger: AspectValidationTrigger,
         binding: RequestClientBinding,
-        request: () => Thenable<DiagnosticReport>,
-    ): Promise<DiagnosticReport | undefined> {
+        request: () => Thenable<ValidationResult>,
+    ): Promise<ValidationResult | undefined> {
         try {
             const result = await this.runWithProgress(title, trigger, request);
             if (this.binding !== binding) {
@@ -124,8 +117,8 @@ export class AspectValidationController {
     private runWithProgress(
         title: string,
         trigger: AspectValidationTrigger,
-        request: () => Thenable<DiagnosticReport>,
-    ): Promise<DiagnosticReport> {
+        request: () => Thenable<ValidationResult>,
+    ): Promise<ValidationResult> {
         if (trigger === 'save') {
             const disposable = this.window.setStatusBarMessage(`${title} in progress...`, STATUS_MESSAGE_TIMEOUT_MS);
             return Promise.resolve(request()).finally(() => disposable.dispose());
@@ -143,7 +136,7 @@ export class AspectValidationController {
         );
     }
 
-    private async showSummary(result: DiagnosticReport, trigger: AspectValidationTrigger): Promise<void> {
+    private async showSummary(result: ValidationResult, trigger: AspectValidationTrigger): Promise<void> {
         const summary = this.formatSummary(result);
         this.outputChannel.info(`[validation] ${summary}`);
 
@@ -152,11 +145,10 @@ export class AspectValidationController {
             return;
         }
 
-        const hasViolations = (result.diagnostics?.length ?? 0) > 0;
-        if (hasViolations) {
-            await this.window.showErrorMessage(summary);
-        } else {
+        if (result === 'validation_successful') {
             await this.window.showInformationMessage(summary);
+        } else {
+            await this.window.showErrorMessage(summary);
         }
     }
 
@@ -172,12 +164,11 @@ export class AspectValidationController {
         await this.window.showErrorMessage(summary);
     }
 
-    private formatSummary(result: DiagnosticReport): string {
-        const violationCount = result.diagnostics?.length ?? 0;
-        if (violationCount === 0) {
+    private formatSummary(result: ValidationResult): string {
+        if (result === 'validation_successful') {
             return 'Aspect validation completed without issues.';
         }
-        return result.diagnostics.map(x => x.message).join(', ');
+        return 'Aspect validation failed. See the Problems view for details.';
     }
 
     private toFailureMessage(error: unknown): string {
