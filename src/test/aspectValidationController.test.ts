@@ -73,7 +73,7 @@ suite('AspectValidationController', () => {
         const harness = createValidationControllerHarness({response: 'validation_failed'});
         const result = await harness.controller.validateDocument(createValidationDocument('/tmp/model.ttl'), 'manual');
 
-        assert.strictEqual(result, 'Error');
+        assert.strictEqual(result, 'validation_failed');
         assert.deepStrictEqual(harness.window.errorMessages, ['Aspect validation failed. See the Problems view for details.']);
         assert.deepStrictEqual(harness.window.infoMessages, []);
     });
