@@ -21,7 +21,7 @@ const STATUS_MESSAGE_TIMEOUT_MS = 5000;
 
 export type AspectValidationTrigger = 'manual' | 'save';
 
-export type ValidationResult = 'Success' | 'Error';
+export type ValidationResult = 'validation_successful' | 'validation_failed';
 
 export interface RequestClient {
     sendRequest<R>(method: string, params?: unknown): Thenable<R>;
@@ -145,7 +145,7 @@ export class AspectValidationController {
             return;
         }
 
-        if (result === 'Success') {
+        if (result === 'validation_successful') {
             await this.window.showInformationMessage(summary);
         } else {
             await this.window.showErrorMessage(summary);
@@ -165,7 +165,7 @@ export class AspectValidationController {
     }
 
     private formatSummary(result: ValidationResult): string {
-        if (result === 'Success') {
+        if (result === 'validation_successful') {
             return 'Aspect validation completed without issues.';
         }
         return 'Aspect validation failed. See the Problems view for details.';

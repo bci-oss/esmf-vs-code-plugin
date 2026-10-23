@@ -61,7 +61,7 @@ export function createValidationControllerHarness(options: ValidationHarnessOpti
                 throw options.error;
             }
 
-            return (options.response ?? 'Success') as R;
+            return (options.response ?? 'validation_successful') as R;
         },
     };
 
